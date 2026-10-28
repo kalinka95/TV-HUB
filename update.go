@@ -69,17 +69,35 @@ func checkUpdate(ctx context.Context) (*updateInfo, error) {
 	if updateRepo == "" {
 		return nil, errors.New("эта сборка сделана не на GitHub, автообновление выключено")
 	}
+	u, apiErr := checkUpdateAPI(ctx)
+	if apiErr == nil {
+		return u, nil
+	}
+	// API GitHub ограничивает проверки без входа (около 60 в час с одного адреса, а через VPN
+	// адрес общий у многих людей). Тогда узнаём версию по обычной странице выпусков.
+	u, webErr := checkUpdateWeb(ctx)
+	if webErr == nil {
+		return u, nil
+	}
+	log.Printf("обновление: API: %v; страница выпусков: %v", apiErr, webErr)
+	return nil, apiErr
+}
+
+func checkUpdateAPI(ctx context.Context) (*updateInfo, error) {
 	base := envOr("TVHUB_UPDATE_API", "https://api.github.com")
 	req, _ := http.NewRequestWithContext(ctx, "GET", base+"/repos/"+updateRepo+"/releases/latest", nil)
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("User-Agent", "TVHub/"+appVersion)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("нет связи с GitHub: %v", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == 404 {
 		return nil, errors.New("на GitHub пока нет ни одной версии")
+	}
+	if resp.StatusCode == 403 || resp.StatusCode == 429 {
+		return nil, errors.New("GitHub временно ограничил проверки с вашего адреса (так бывает через VPN). Попробуйте позже или выключите VPN")
 	}
 	if resp.StatusCode != 200 {
 		return nil, fmt.Errorf("GitHub ответил %d", resp.StatusCode)
@@ -107,6 +125,36 @@ func checkUpdate(ctx context.Context) (*updateInfo, error) {
 	}
 	if u.URL == "" || u.SumURL == "" {
 		return nil, errors.New("в новой версии нет файла TVHub.exe или его контрольной суммы")
+	}
+	return u, nil
+}
+
+// checkUpdateWeb: github.com/…/releases/latest перенаправляет на страницу последней версии,
+// а файлы версии лежат по постоянным ссылкам releases/download/<версия>/…
+func checkUpdateWeb(ctx context.Context) (*updateInfo, error) {
+	base := envOr("TVHUB_UPDATE_WEB", "https://github.com")
+	c := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	req, _ := http.NewRequestWithContext(ctx, "GET", base+"/"+updateRepo+"/releases/latest", nil)
+	req.Header.Set("User-Agent", "TVHub/"+appVersion)
+	resp, err := c.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	resp.Body.Close()
+	loc := resp.Header.Get("Location")
+	i := strings.LastIndex(loc, "/tag/")
+	if resp.StatusCode/100 != 3 || i < 0 {
+		return nil, fmt.Errorf("страница выпусков ответила %d", resp.StatusCode)
+	}
+	tag := loc[i+len("/tag/"):]
+	if tag == "" || strings.ContainsAny(tag, "/?#") {
+		return nil, errors.New("не понял номер версии")
+	}
+	dl := base + "/" + updateRepo + "/releases/download/" + tag + "/"
+	u := &updateInfo{Version: strings.TrimPrefix(tag, "v"), URL: dl + updateAsset, SumURL: dl + updateSum}
+	// Описание версии лежит рядом отдельным файлом (в новых выпусках)
+	if b, err := fetchBytes(ctx, dl+"notes.txt", 64<<10); err == nil {
+		u.Notes = strings.TrimSpace(string(b))
 	}
 	return u, nil
 }

@@ -71,5 +71,5 @@ jobs:
         run: |
           # Что нового — из описания коммита на русском (без служебных строк), его TVHub показывает в окне обновления
           git log -1 --format=%B | grep -v -E '^(Co-Authored-By|Claude-Session|Signed-off-by):' | sed -e '/./,$!d' > notes.txt
-          gh release create "v${{ steps.ver.outputs.version }}" dist/TVHub.exe dist/TVHub.exe.sha256 dist/TVHub-windows.zip \
+          gh release create "v${{ steps.ver.outputs.version }}" dist/TVHub.exe dist/TVHub.exe.sha256 dist/TVHub-windows.zip notes.txt \
             --title "TVHub ${{ steps.ver.outputs.version }}" --notes-file notes.txt

@@ -25,7 +25,7 @@ import (
 )
 
 // Версию подставляет сборка на GitHub (-ldflags -X main.appVersion=…)
-var appVersion = "1.3.7"
+var appVersion = "1.3.8"
 
 //go:embed web
 var webFS embed.FS

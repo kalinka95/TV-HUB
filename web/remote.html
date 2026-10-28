@@ -32,9 +32,8 @@ header { display: flex; align-items: center; gap: 10px; height: 44px; flex: none
 .status.on .dot { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
 .status.off .dot { background: var(--danger); }
 
-.tabs { position: relative; z-index: 2; display: flex; background: var(--surface); border-radius: 12px; padding: 4px; margin: 8px 0 14px; flex: none; overflow-x: auto; scrollbar-width: none; }
-.tabs::-webkit-scrollbar { display: none; }
-.tabs button { flex: 1 0 auto; padding: 9px 10px; border-radius: 9px; font-size: 13.5px; font-weight: 600; color: var(--muted); }
+.tabs { position: relative; z-index: 2; display: flex; flex-wrap: wrap; gap: 2px; background: var(--surface); border-radius: 12px; padding: 4px; margin: 8px 0 14px; flex: none; }
+.tabs button { flex: 1 0 auto; padding: 9px 8px; border-radius: 9px; font-size: 13.5px; font-weight: 600; color: var(--muted); }
 .tabs button.sel { background: var(--surface-2); color: var(--text); }
 
 .view { flex: 1; display: flex; flex-direction: column; min-height: 0; gap: 18px; }
@@ -621,8 +620,22 @@ if (!KEY) {
   setStatus('off', 'Нет ключа');
   fatal('Откройте пульт по QR-коду', 'На компьютере в TVHub: «Настройки» → «Пульт на телефоне». Отсканируйте QR-код камерой телефона.');
 } else {
-  post('/r/api/hello').then((ok) => { if (ok) toast('Пульт подключён'); });
-  setInterval(() => { if (document.visibilityState === 'visible') post('/r/api/hello'); }, 20000);
+  // Если TVHub на компьютере обновился — перезагружаем пульт, чтобы появились новые кнопки
+  let pageVersion = null;
+  const hello = async () => {
+    try {
+      const r = await fetch('/r/api/hello', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Remote': KEY }, body: '{}' });
+      if (r.status === 403) { setStatus('off', 'Нет доступа'); fatal('Ссылка устарела', 'Откройте на компьютере TVHub → «Пульт на телефоне» и отсканируйте QR-код заново.'); return false; }
+      const d = await r.json();
+      setStatus('on', 'Подключено');
+      if (pageVersion && d.version && d.version !== pageVersion) { location.reload(); return true; }
+      pageVersion = pageVersion || d.version;
+      return true;
+    } catch (e) { setStatus('off', 'Нет связи'); return false; }
+  };
+  hello().then((ok) => { if (ok) toast('Пульт подключён'); });
+  setInterval(() => { if (document.visibilityState === 'visible') hello(); }, 20000);
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') hello(); });
 }
 // Держим экран телефона включённым, пока открыт пульт (где поддерживается)
 async function wake() { try { if (navigator.wakeLock && document.visibilityState === 'visible') await navigator.wakeLock.request('screen'); } catch (e) {} }

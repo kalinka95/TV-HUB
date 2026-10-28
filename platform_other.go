@@ -131,6 +131,7 @@ func getMedia() (mediaState, bool) {
 		m.Pos = float64(int(time.Since(devMediaStart).Seconds()+42) % 225)
 	}
 	m.At = time.Now().Unix()
+	fillCoverFallback(&m)
 	return m, true
 }
 func mediaCoverBytes() []byte { return nil }
@@ -186,3 +187,4 @@ var devDark = false
 func windowsDark() bool            { return devDark }
 func setWindowsDark(on bool) error { devDark = on; return nil }
 func restartWebApps()              {}
+func showMusicScreen()             { pushEvent(map[string]string{"type": "music"}) }

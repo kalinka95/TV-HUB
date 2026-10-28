@@ -24,7 +24,7 @@ body {
 }
 button { font: inherit; color: inherit; border: 0; background: none; padding: 0; cursor: pointer; }
 
-header { display: flex; align-items: center; gap: 10px; height: 44px; flex: none; }
+header { display: flex; align-items: center; gap: 10px; height: 44px; flex: none; position: relative; z-index: 2; }
 .logo { width: 30px; height: 30px; border-radius: 9px; background: linear-gradient(135deg, var(--accent), var(--accent-2)); display: grid; place-items: center; font-weight: 800; font-size: 12px; }
 .title { font-weight: 700; font-size: 17px; }
 .status { margin-left: auto; font-size: 13px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
@@ -32,8 +32,9 @@ header { display: flex; align-items: center; gap: 10px; height: 44px; flex: none
 .status.on .dot { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
 .status.off .dot { background: var(--danger); }
 
-.tabs { display: flex; background: var(--surface); border-radius: 12px; padding: 4px; margin: 8px 0 14px; flex: none; }
-.tabs button { flex: 1; padding: 9px 0; border-radius: 9px; font-size: 13.5px; font-weight: 600; color: var(--muted); }
+.tabs { position: relative; z-index: 2; display: flex; background: var(--surface); border-radius: 12px; padding: 4px; margin: 8px 0 14px; flex: none; overflow-x: auto; scrollbar-width: none; }
+.tabs::-webkit-scrollbar { display: none; }
+.tabs button { flex: 1 0 auto; padding: 9px 10px; border-radius: 9px; font-size: 13.5px; font-weight: 600; color: var(--muted); }
 .tabs button.sel { background: var(--surface-2); color: var(--text); }
 
 .view { flex: 1; display: flex; flex-direction: column; min-height: 0; gap: 18px; }
@@ -103,6 +104,31 @@ header { display: flex; align-items: center; gap: 10px; height: 44px; flex: none
 .sheet-title { font-weight: 700; font-size: 17px; margin-bottom: 4px; }
 .sheet .key { flex: none; background: var(--surface-2); }
 
+/* Музыка */
+#v-music { overflow-y: auto; }
+.mu { position: relative; isolation: isolate; display: flex; flex-direction: column; align-items: center; text-align: center; gap: 8px; padding: 6px 0 12px; }
+.mu-bgimg { position: fixed; inset: -20%; background-size: cover; background-position: center; filter: blur(60px) saturate(1.4) brightness(.55); opacity: 0; transition: opacity 1s, background-image 1s; z-index: 0; pointer-events: none; }
+.mu > :not(.mu-bgimg) { position: relative; z-index: 1; }
+.mu-bgimg.on { opacity: .9; }
+.mu-cover { width: min(66vw, 34vh); aspect-ratio: 1; border-radius: 22px; overflow: hidden; display: grid; place-items: center;
+  background: linear-gradient(135deg, #fc3f1d, #8b5cf6); box-shadow: 0 18px 50px #0009; font-size: 80px; margin-bottom: 10px; }
+.mu-cover img { width: 100%; height: 100%; object-fit: cover; }
+.mu-state { font-size: 12px; color: var(--muted); letter-spacing: .1em; text-transform: uppercase; font-weight: 700; }
+.mu-title { font-size: 22px; font-weight: 800; line-height: 1.2; padding: 0 8px; }
+.mu-artist { font-size: 15px; color: #c7cede; }
+.mu-prog { display: flex; align-items: center; gap: 10px; width: 100%; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; margin-top: 6px; }
+.mu-bar { flex: 1; height: 4px; border-radius: 2px; background: #ffffff26; overflow: hidden; }
+.mu-bar i { display: block; height: 100%; width: 0; background: var(--text); }
+.mu-ctrls { display: flex; gap: 18px; align-items: center; margin: 10px 0 6px; }
+.mu-b { width: 64px; height: 64px; border-radius: 50%; background: #ffffff1f; display: grid; place-items: center; transition: transform .08s; }
+.mu-b svg { width: 28px; height: 28px; stroke: var(--text); fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.mu-b.mu-play { width: 80px; height: 80px; background: var(--text); }
+.mu-b.mu-play svg { stroke: var(--bg); fill: var(--bg); width: 32px; height: 32px; }
+.mu-b:active, .mu-b.down { transform: scale(.92); }
+.mu-vol, .mu-acts { display: flex; gap: 10px; width: 100%; }
+.mu-vol .key, .mu-acts .key { flex: 1; font-size: 14px; background: #161a23d9; backdrop-filter: blur(10px); }
+.mu-acts .key.primary { background: var(--accent); }
+
 /* Окна */
 .wins-head { display: flex; align-items: center; justify-content: space-between; flex: none; }
 .wins-title { font-size: 15px; font-weight: 700; }
@@ -154,6 +180,7 @@ header { display: flex; align-items: center; gap: 10px; height: 44px; flex: none
   <button data-v="touch">Тачпад</button>
   <button data-v="digits">Цифры</button>
   <button data-v="text">Текст</button>
+  <button data-v="music">Музыка</button>
   <button data-v="wins">Окна</button>
 </nav>
 
@@ -235,6 +262,31 @@ header { display: flex; align-items: center; gap: 10px; height: 44px; flex: none
     </div>
   </div>
   <p class="note">Сначала выберите поле ввода на экране (поиск, адрес плейлиста), затем напишите текст здесь и нажмите «Отправить».</p>
+</section>
+
+<!-- Музыка -->
+<section class="view hidden" id="v-music">
+  <div class="mu">
+    <div class="mu-bgimg" id="muBgImg"></div>
+    <div class="mu-cover" id="muCover"><span>♪</span></div>
+    <div class="mu-state" id="muState">Загружаю…</div>
+    <div class="mu-title" id="muTitle"></div>
+    <div class="mu-artist" id="muArtist"></div>
+    <div class="mu-prog hidden" id="muProg"><span id="muPos">0:00</span><div class="mu-bar"><i id="muBar"></i></div><span id="muDur">0:00</span></div>
+    <div class="mu-ctrls">
+      <button class="mu-b" data-mu="prev" aria-label="Предыдущий"><svg viewBox="0 0 24 24"><path d="M6 5v14"/><path d="M19 5l-10 7 10 7z"/></svg></button>
+      <button class="mu-b mu-play" data-mu="playpause" aria-label="Пауза"><svg viewBox="0 0 24 24"><path id="muPlayIco" d="M7 5l12 7-12 7z"/></svg></button>
+      <button class="mu-b" data-mu="next" aria-label="Следующий"><svg viewBox="0 0 24 24"><path d="M18 5v14"/><path d="M5 5l10 7-10 7z"/></svg></button>
+    </div>
+    <div class="mu-vol">
+      <button class="key" data-mu="voldown">🔉 Тише</button>
+      <button class="key" data-mu="volup">🔊 Громче</button>
+    </div>
+    <div class="mu-acts">
+      <button class="key primary" data-mu="show">Показать на экране</button>
+      <button class="key" data-mu="open">Открыть Яндекс Музыку</button>
+    </div>
+  </div>
 </section>
 
 <!-- Открытые окна -->
@@ -380,6 +432,67 @@ wheel.addEventListener('pointermove', (e) => {
   acc.wheel += -d * 6; queueMouse();
 });
 ['pointerup', 'pointercancel'].forEach((ev) => wheel.addEventListener(ev, () => { wy = null; }));
+
+// ----- Музыка -----
+let muAt = 0, muSt = null;
+function fmtT(s) { s = Math.max(0, Math.round(s || 0)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); }
+async function loadMusic() {
+  let d;
+  try {
+    const r = await fetch('/r/api/media', { headers: { 'X-Remote': KEY } });
+    if (r.status === 403) { fatal('Ссылка устарела', 'Отсканируйте QR-код в TVHub заново.'); return; }
+    d = await r.json();
+  } catch (e) { setStatus('off', 'Нет связи'); return; }
+  setStatus('on', 'Подключено');
+  const m = d.media || {};
+  muSt = m; muAt = Date.now();
+  const playing = m.status === 'Playing';
+  if (m.title) {
+    $('muState').textContent = playing ? 'Сейчас играет' : 'На паузе';
+    $('muTitle').textContent = m.title;
+    $('muArtist').textContent = m.artist || '';
+  } else {
+    $('muState').textContent = 'Ничего не играет';
+    $('muTitle').textContent = 'Включите музыку';
+    $('muArtist').textContent = 'Нажмите «Открыть Яндекс Музыку» и включите «Мою волну»';
+  }
+  const src = m.coverVer ? `/r/api/media/cover?k=${encodeURIComponent(KEY)}&v=${m.coverVer}` : (m.coverUrl || '').replace(/^\/\//, 'https://');
+  const cov = $('muCover');
+  if (src && cov.dataset.src !== src) {
+    cov.dataset.src = src;
+    cov.innerHTML = `<img src="${src}" alt="">`;
+    $('muBgImg').style.backgroundImage = `url("${src}")`;
+    $('muBgImg').classList.add('on');
+  } else if (!src && cov.dataset.src) {
+    cov.dataset.src = ''; cov.innerHTML = '<span>♪</span>'; $('muBgImg').classList.remove('on');
+  }
+  $('muPlayIco').setAttribute('d', playing ? 'M8 5v14M16 5v14' : 'M7 5l12 7-12 7z');
+  tickMusic();
+}
+function tickMusic() {
+  const m = muSt;
+  if (!m || !m.dur || m.dur < 1) { $('muProg').classList.add('hidden'); return; }
+  const pos = Math.min(m.dur, m.pos + (m.status === 'Playing' ? (Date.now() - muAt) / 1000 : 0));
+  $('muProg').classList.remove('hidden');
+  $('muPos').textContent = fmtT(pos); $('muDur').textContent = fmtT(m.dur);
+  $('muBar').style.width = (pos / m.dur * 100).toFixed(1) + '%';
+}
+document.querySelectorAll('[data-mu]').forEach((b) => b.addEventListener('click', async () => {
+  buzz();
+  const action = b.dataset.mu;
+  try {
+    const r = await fetch('/r/api/media', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Remote': KEY }, body: JSON.stringify({ action }) });
+    const d = await r.json();
+    if (!d.ok) toast(d.error || 'Не получилось');
+    else if (action === 'show') toast('Музыка открыта на экране');
+    else if (action === 'open') toast('Открываю Яндекс Музыку…');
+  } catch (e) { toast('Нет связи с компьютером'); }
+  setTimeout(loadMusic, 500);
+}));
+setInterval(() => { if (document.visibilityState === 'visible' && !$('v-music').classList.contains('hidden')) loadMusic(); }, 2000);
+setInterval(() => { if (!$('v-music').classList.contains('hidden')) tickMusic(); }, 500);
+document.querySelector('#tabs [data-v="music"]').addEventListener('click', loadMusic);
+if (!$('v-music').classList.contains('hidden')) loadMusic();
 
 // ----- Открытые окна -----
 const winsBox = $('wins');

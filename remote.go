@@ -299,6 +299,47 @@ func startRemoteServer() {
 	mux.HandleFunc("GET /r/api/brightness", remoteAuth(func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]any{"level": currentBrightness()})
 	}))
+	// Музыка на пульте: что играет, управление, показать экран музыки на ноутбуке
+	mux.HandleFunc("GET /r/api/media", remoteAuth(func(w http.ResponseWriter, r *http.Request) {
+		st, ok := getMedia()
+		writeJSON(w, map[string]any{"media": st, "available": ok})
+	}))
+	mux.HandleFunc("POST /r/api/media", remoteAuth(func(w http.ResponseWriter, r *http.Request) {
+		var req struct{ Action string }
+		json.NewDecoder(io.LimitReader(r.Body, 1024)).Decode(&req)
+		var err error
+		switch req.Action {
+		case "show":
+			showMusicScreen()
+		case "open":
+			err = launchApp(yandexMusicApp)
+		default:
+			err = mediaAction(req.Action)
+		}
+		if err != nil {
+			writeJSON(w, map[string]any{"ok": false, "error": err.Error()})
+			return
+		}
+		writeJSON(w, map[string]any{"ok": true})
+	}))
+	// Картинку телефон грузит тегом <img>, поэтому ключ — в адресе
+	mux.HandleFunc("GET /r/api/media/cover", func(w http.ResponseWriter, r *http.Request) {
+		cfgMu.Lock()
+		key := cfg.RemoteKey
+		cfgMu.Unlock()
+		if subtle.ConstantTimeCompare([]byte(r.URL.Query().Get("k")), []byte(key)) != 1 {
+			http.Error(w, "bad key", 403)
+			return
+		}
+		b := mediaCoverBytes()
+		if len(b) == 0 {
+			http.Error(w, "no cover", 404)
+			return
+		}
+		w.Header().Set("Content-Type", http.DetectContentType(b))
+		w.Header().Set("Cache-Control", "max-age=3600")
+		w.Write(b)
+	})
 	mux.HandleFunc("GET /r/api/windows", remoteAuth(func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]any{"windows": listWindows()})
 	}))

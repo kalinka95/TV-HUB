@@ -901,6 +901,7 @@ function listenEvents() {
     else if (ev.type === 'update') onUpdateEvent(ev);
     else if (ev.type === 'brightness') onBrightnessEvent(ev);
     else if (ev.type === 'home') window.tvHome();
+    else if (ev.type === 'music') window.tvMusic();
     else if (ev.type === 'key') {
       const key = KEYS[ev.key] || ev.key;
       if (key.length === 1 && cur && cur.tagName === 'INPUT' && /[0-9 ]/.test(key)) { cur.setRangeText(key, cur.selectionStart, cur.selectionEnd, 'end'); return; }
@@ -964,6 +965,16 @@ function show(name) {
   }
   if (name === 'keytest') { $('ktLog').innerHTML = ''; $('ktBig').textContent = 'Нажмите любую кнопку на пульте'; $('ktAction').textContent = ''; }
 }
+
+// Вызывается с пульта: показать экран «Музыка»
+window.tvMusic = function () {
+  hideSaver();
+  if (!$('modal').classList.contains('hidden')) closeModal();
+  if (S.screen === 'player') exitPlayer();
+  if (S.screen !== 'main') show('main');
+  switchTab('music');
+  focusByKey('mu:play', $('main')) || focusFirst($('panel-music'));
+};
 
 // Вызывается из Go, когда нажата кнопка «Домой» на пульте
 window.tvHome = function () {

@@ -420,3 +420,14 @@ func waitUIReady() {
 		time.Sleep(100 * time.Millisecond)
 	}
 }
+
+// showMusicScreen выводит TVHub на экран и открывает вкладку «Музыка».
+func showMusicScreen() {
+	if wv == nil {
+		return
+	}
+	wv.Dispatch(func() {
+		bringToFront()
+		wv.Eval("window.tvMusic && window.tvMusic()")
+	})
+}

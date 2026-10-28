@@ -34,9 +34,12 @@ $asTask = ([System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object {
 function Await($op, [Type]$t) { $task = $asTask.MakeGenericMethod($t).Invoke($null, @($op)); $null = $task.Wait(5000); if ($task.IsCompleted) { $task.Result } else { $null } }
 $null = [Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager, Windows.Media.Control, ContentType = WindowsRuntime]
 $null = [Windows.Storage.Streams.IRandomAccessStreamWithContentType, Windows.Storage.Streams, ContentType = WindowsRuntime]
+$null = [Windows.Storage.Streams.DataReader, Windows.Storage.Streams, ContentType = WindowsRuntime]
 $mgr = Await ([Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager]::RequestAsync()) ([Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager])
 if (-not $mgr) { [Console]::Out.WriteLine('{"ok":false}'); exit }
 $lastKey = ''
+$coverTries = 0
+$haveCover = $false
 $cmdFile = $env:TVHUB_MEDIA_CMD
 function Emit {
   $o = @{ ok = $true }
@@ -50,19 +53,22 @@ function Emit {
     $o.app = [string]$s.SourceAppUserModelId
     $o.pos = $tl.Position.TotalSeconds; $o.dur = $tl.EndTime.TotalSeconds
     $key = "$($p.Title)|$($p.Artist)"
-    if ($key -ne $script:lastKey) {
-      $script:lastKey = $key
-      $o.cover = ''
-      if ($p.Thumbnail) {
+    if ($key -ne $script:lastKey) { $script:lastKey = $key; $script:coverTries = 0; $script:haveCover = $false; $o.cover = '' }
+    # Обложка часто приходит позже названия — пробуем несколько раз
+    if (-not $script:haveCover -and $script:coverTries -lt 8 -and $p.Thumbnail) {
+      $script:coverTries++
+      try {
         $rs = Await ($p.Thumbnail.OpenReadAsync()) ([Windows.Storage.Streams.IRandomAccessStreamWithContentType])
-        if ($rs) {
-          $st = [System.IO.WindowsRuntimeStreamExtensions]::AsStreamForRead($rs)
-          $ms = New-Object System.IO.MemoryStream
-          $st.CopyTo($ms)
-          if ($ms.Length -lt 3000000) { $o.cover = [Convert]::ToBase64String($ms.ToArray()) }
-          $st.Dispose(); $ms.Dispose()
+        if ($rs -and $rs.Size -gt 0 -and $rs.Size -lt 3000000) {
+          $reader = [Windows.Storage.Streams.DataReader]::new($rs.GetInputStreamAt(0))
+          $null = Await ($reader.LoadAsync([uint32]$rs.Size)) ([uint32])
+          $bytes = New-Object byte[] ([int]$rs.Size)
+          $reader.ReadBytes($bytes)
+          $reader.Dispose(); $rs.Dispose()
+          $o.cover = [Convert]::ToBase64String($bytes)
+          $script:haveCover = $true
         }
-      }
+      } catch {}
     }
   }
   [Console]::Out.WriteLine(($o | ConvertTo-Json -Compress))
@@ -154,12 +160,13 @@ func ensureMediaMonitor() {
 			}
 			mediaMu.Lock()
 			cover := media.CoverVer
-			if st.Cover != nil {
+			if st.Title != media.Title || st.Artist != media.Artist {
+				cover, mediaCover = "", nil // новый трек — старая обложка не подходит
+			}
+			if st.Cover != nil && *st.Cover != "" {
 				if raw, err := base64.StdEncoding.DecodeString(*st.Cover); err == nil && len(raw) > 0 {
 					h := sha1.Sum(raw)
 					mediaCover, cover = raw, hex.EncodeToString(h[:6])
-				} else {
-					mediaCover, cover = nil, ""
 				}
 			}
 			media = st.mediaState
@@ -189,6 +196,7 @@ func getMedia() (mediaState, bool) {
 	mediaMu.Lock()
 	st, ok := media, mediaFails <= 5
 	mediaMu.Unlock()
+	defer func() { fillCoverFallback(&st) }()
 	// Windows не сообщает, что играет, или не отдаёт обложку — спросим сайт Яндекс Музыки
 	if st.Title == "" || (st.CoverVer == "" && strings.Contains(strings.ToLower(st.App), "edge")) {
 		if w, found := webMusicInfo(); found && (st.Title == "" || strings.EqualFold(w.Title, st.Title)) {

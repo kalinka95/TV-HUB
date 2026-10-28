@@ -37,10 +37,8 @@ jobs:
             -ldflags "-s -w -H windowsgui -X main.appVersion=$VER -X main.updateRepo=$GITHUB_REPOSITORY" \
             -o dist/TVHub.exe .
 
-      - name: Цифровая подпись для автообновления
-        env:
-          UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
-        run: go run ./tools/sign dist/TVHub.exe
+      - name: Контрольная сумма для автообновления
+        run: cd dist && sha256sum TVHub.exe > TVHub.exe.sha256
 
       - name: Архив для ручной установки
         run: |
@@ -51,5 +49,5 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" dist/TVHub.exe dist/TVHub.exe.sig dist/TVHub-windows.zip \
+          gh release create "$GITHUB_REF_NAME" dist/TVHub.exe dist/TVHub.exe.sha256 dist/TVHub-windows.zip \
             --title "TVHub ${GITHUB_REF_NAME#v}" --generate-notes

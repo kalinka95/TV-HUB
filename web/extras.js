@@ -805,7 +805,7 @@ function updateSection(inner) {
     if (st.error) line += '<br>' + esc(st.error);
     if (st.checked) line += `<br><span class="src">Проверено ${ago(st.checked)}${st.repo ? ' · github.com/' + esc(st.repo) : ''}</span>`;
   }
-  sec.append(el('p', 'note', line + '<br>TVHub сам проверяет обновления раз в день и присылает уведомление. Перед установкой проверяется цифровая подпись файла.'));
+  sec.append(el('p', 'note', line + '<br>TVHub проверяет обновления при запуске и каждый час и сразу предлагает обновиться. Перед установкой проверяется, что файл скачался целиком.'));
   const r = el('div', 's-row');
   r.style.background = 'transparent'; r.style.padding = '.2rem 0';
   if (st && st.available) r.append(btn(`Обновить до ${st.available.version}`, askInstallUpdate, 'upd-install', 'primary'));

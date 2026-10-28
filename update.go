@@ -1,11 +1,9 @@
-// Автообновление: проверка новой версии на GitHub, скачивание и проверка цифровой подписи.
+// Автообновление: проверка новой версии на GitHub, скачивание и проверка контрольной суммы.
 package main
 
 import (
 	"context"
-	"crypto/ed25519"
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -24,20 +22,18 @@ import (
 // Задаются при сборке на GitHub (-ldflags -X): репозиторий вида «владелец/TV-HUB».
 var updateRepo = ""
 
-// Открытый ключ для проверки подписи. Закрытый ключ хранится только в секретах GitHub,
-// поэтому подменённый файл TVHub не установит.
-const updatePubKey = "EKR4SqnwFRWe2Lw0r9uCluQ6Pmm32QcMIZV8na8a/Wk="
-
+// Новая версия на GitHub — это TVHub.exe и его контрольная сумма SHA-256.
+// Перед установкой TVHub проверяет, что файл скачался целиком и не повреждён.
 const (
 	updateAsset = "TVHub.exe"
-	updateSig   = "TVHub.exe.sig"
+	updateSum   = "TVHub.exe.sha256"
 )
 
 type updateInfo struct {
 	Version string `json:"version"`
 	Notes   string `json:"notes,omitempty"`
 	URL     string `json:"-"`
-	SigURL  string `json:"-"`
+	SumURL  string `json:"-"`
 	Size    int64  `json:"size,omitempty"`
 }
 
@@ -105,12 +101,12 @@ func checkUpdate(ctx context.Context) (*updateInfo, error) {
 		switch a.Name {
 		case updateAsset:
 			u.URL, u.Size = a.URL, a.Size
-		case updateSig:
-			u.SigURL = a.URL
+		case updateSum:
+			u.SumURL = a.URL
 		}
 	}
-	if u.URL == "" || u.SigURL == "" {
-		return nil, errors.New("в новой версии нет файла TVHub.exe или подписи")
+	if u.URL == "" || u.SumURL == "" {
+		return nil, errors.New("в новой версии нет файла TVHub.exe или его контрольной суммы")
 	}
 	return u, nil
 }
@@ -129,19 +125,15 @@ func fetchBytes(ctx context.Context, u string, limit int64) ([]byte, error) {
 	return io.ReadAll(io.LimitReader(resp.Body, limit))
 }
 
-// verifySig проверяет подпись: подписан SHA-256 файла.
-func verifySig(data, sig []byte) error {
-	pub, err := base64.StdEncoding.DecodeString(updatePubKey)
-	if err != nil || len(pub) != ed25519.PublicKeySize {
-		return errors.New("неверный ключ проверки")
-	}
-	s, err := base64.StdEncoding.DecodeString(strings.TrimSpace(string(sig)))
-	if err != nil {
-		return errors.New("подпись повреждена")
+// verifySum сверяет SHA-256 файла с опубликованной контрольной суммой.
+func verifySum(data, sumFile []byte) error {
+	fields := strings.Fields(string(sumFile))
+	if len(fields) == 0 || len(fields[0]) != 64 {
+		return errors.New("контрольная сумма повреждена")
 	}
 	sum := sha256.Sum256(data)
-	if !ed25519.Verify(ed25519.PublicKey(pub), []byte(hex.EncodeToString(sum[:])), s) {
-		return errors.New("подпись не совпадает — файл повреждён или подменён, установка отменена")
+	if !strings.EqualFold(fields[0], hex.EncodeToString(sum[:])) {
+		return errors.New("файл повреждён при скачивании, установка отменена")
 	}
 	return nil
 }
@@ -149,9 +141,9 @@ func verifySig(data, sig []byte) error {
 func downloadUpdate(u *updateInfo) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
-	sig, err := fetchBytes(ctx, u.SigURL, 4096)
+	sum, err := fetchBytes(ctx, u.SumURL, 4096)
 	if err != nil {
-		return "", fmt.Errorf("подпись: %v", err)
+		return "", fmt.Errorf("контрольная сумма: %v", err)
 	}
 	data, err := fetchBytes(ctx, u.URL, 200<<20)
 	if err != nil {
@@ -160,7 +152,7 @@ func downloadUpdate(u *updateInfo) (string, error) {
 	if u.Size > 0 && int64(len(data)) != u.Size {
 		return "", errors.New("файл скачался не полностью")
 	}
-	if err := verifySig(data, sig); err != nil {
+	if err := verifySum(data, sum); err != nil {
 		return "", err
 	}
 	dir := filepath.Join(dataDir, "update")

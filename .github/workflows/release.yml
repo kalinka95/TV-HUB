@@ -1,9 +1,10 @@
 name: Выпуск версии
 
-# Новая версия выходит, когда в репозиторий добавляют метку вида v1.2.3.
+# Новая версия выходит сама, когда в main.go меняется номер версии (var appVersion = "…").
 on:
   push:
-    tags: ['v*']
+    branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -14,40 +15,59 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Номер версии
+        id: ver
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VER=$(sed -n 's/^var appVersion = "\(.*\)"/\1/p' main.go)
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+          if gh release view "v$VER" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Версия v$VER уже выпущена — пропускаю"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: actions/setup-go@v5
+        if: steps.ver.outputs.skip != 'true'
         with:
           go-version-file: go.mod
 
       - name: Проверка кода
+        if: steps.ver.outputs.skip != 'true'
         run: |
           go vet ./...
           GOOS=windows go vet ./...
           go test ./...
 
       - name: Иконка и манифест Windows
+        if: steps.ver.outputs.skip != 'true'
         run: |
           go install github.com/tc-hib/go-winres@latest
-          VER="${GITHUB_REF_NAME#v}"
+          VER="${{ steps.ver.outputs.version }}"
           "$(go env GOPATH)/bin/go-winres" make --arch amd64 --product-version "$VER" --file-version "$VER"
 
       - name: Сборка TVHub.exe
+        if: steps.ver.outputs.skip != 'true'
         run: |
-          VER="${GITHUB_REF_NAME#v}"
+          VER="${{ steps.ver.outputs.version }}"
           GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath \
             -ldflags "-s -w -H windowsgui -X main.appVersion=$VER -X main.updateRepo=$GITHUB_REPOSITORY" \
             -o dist/TVHub.exe .
 
       - name: Контрольная сумма для автообновления
+        if: steps.ver.outputs.skip != 'true'
         run: cd dist && sha256sum TVHub.exe > TVHub.exe.sha256
 
       - name: Архив для ручной установки
+        if: steps.ver.outputs.skip != 'true'
         run: |
           cp README.md dist/
           cd dist && zip -q TVHub-windows.zip TVHub.exe README.md
 
       - name: Публикация версии
+        if: steps.ver.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" dist/TVHub.exe dist/TVHub.exe.sha256 dist/TVHub-windows.zip \
-            --title "TVHub ${GITHUB_REF_NAME#v}" --generate-notes
+          gh release create "v${{ steps.ver.outputs.version }}" dist/TVHub.exe dist/TVHub.exe.sha256 dist/TVHub-windows.zip \
+            --title "TVHub ${{ steps.ver.outputs.version }}" --generate-notes

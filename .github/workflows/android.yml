@@ -1,0 +1,51 @@
+name: Приложение «Пульт TVHub» для Android
+
+# Собирает TVHub-Remote.apk, когда меняется папка android/, и выкладывает его
+# в выпуск «remote-app» (предварительный, чтобы не мешать обновлениям TVHub).
+on:
+  push:
+    branches: [main]
+    paths: ['android/**', '.github/workflows/android.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
+
+      - name: Сборка APK
+        env:
+          VERSION_CODE: ${{ github.run_number }}
+          VERSION_NAME: 1.0.${{ github.run_number }}
+        run: |
+          # Одноразовый ключ подписи: создаётся здесь и пропадает после сборки
+          export APK_KEY_PASS="$(openssl rand -hex 16)"
+          export APK_KEYSTORE="$RUNNER_TEMP/apk.jks"
+          keytool -genkeypair -keystore "$APK_KEYSTORE" -storepass "$APK_KEY_PASS" -keypass "$APK_KEY_PASS" \
+            -alias tvhub -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=TVHub Remote, O=TVHub, C=RU"
+          gradle -p android assembleRelease --no-daemon
+
+      - name: Публикация
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp android/app/build/outputs/apk/release/app-release.apk TVHub-Remote.apk
+          if ! gh release view remote-app --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create remote-app --repo "$GITHUB_REPOSITORY" --prerelease --latest=false \
+              --title "Пульт TVHub для Android" \
+              --notes "Приложение-пульт для телефона на Android. Установите TVHub-Remote.apk и отсканируйте QR-код в TVHub («Система» → «Пульт на телефоне»)."
+          fi
+          gh release upload remote-app TVHub-Remote.apk --clobber --repo "$GITHUB_REPOSITORY"

@@ -367,7 +367,15 @@ func handleRemoteInfo(w http.ResponseWriter, r *http.Request) {
 	remMu.Lock()
 	e := remError
 	remMu.Unlock()
-	writeJSON(w, map[string]any{"enabled": !off, "urls": remoteURLs(), "error": e})
+	writeJSON(w, map[string]any{"enabled": !off, "urls": remoteURLs(), "error": e, "app": remoteAppURL()})
+}
+
+// remoteAppURL — ссылка на приложение «Пульт TVHub» для Android (собирается на GitHub).
+func remoteAppURL() string {
+	if updateRepo == "" {
+		return ""
+	}
+	return "https://github.com/" + updateRepo + "/releases/download/remote-app/TVHub-Remote.apk"
 }
 
 func handleRemoteRegen(w http.ResponseWriter, r *http.Request) {
@@ -384,7 +392,7 @@ func handleRemoteQR(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	u := r.URL.Query().Get("u")
-	ok := false
+	ok := u != "" && u == remoteAppURL()
 	for _, x := range remoteURLs() {
 		if x == u {
 			ok = true

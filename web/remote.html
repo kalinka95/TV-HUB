@@ -96,6 +96,13 @@ header { display: flex; align-items: center; gap: 10px; height: 44px; flex: none
 .key.primary { background: var(--accent); }
 .note { color: var(--muted); font-size: 13px; line-height: 1.5; margin: 0; }
 
+/* Меню приложения для Android */
+.app-menu { width: 40px; height: 40px; border-radius: 12px; background: var(--surface); font-size: 22px; font-weight: 800; margin-left: 8px; }
+.sheet { position: fixed; inset: 0; background: #000a; z-index: 8; display: flex; align-items: flex-end; }
+.sheet-box { width: 100%; background: var(--surface); border-radius: 20px 20px 0 0; padding: 18px 16px max(18px, env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: 10px; }
+.sheet-title { font-weight: 700; font-size: 17px; margin-bottom: 4px; }
+.sheet .key { flex: none; background: var(--surface-2); }
+
 /* Окна */
 .wins-head { display: flex; align-items: center; justify-content: space-between; flex: none; }
 .wins-title { font-size: 15px; font-weight: 700; }
@@ -130,7 +137,16 @@ header { display: flex; align-items: center; gap: 10px; height: 44px; flex: none
   <div class="logo">TV</div>
   <div class="title">Пульт TVHub</div>
   <div class="status" id="status"><span class="dot"></span><span id="statusText">Подключение…</span></div>
+  <button class="app-menu hidden" id="appMenu" aria-label="Настройки приложения">⋯</button>
 </header>
+<div class="sheet hidden" id="sheet">
+  <div class="sheet-box">
+    <div class="sheet-title">Пульт TVHub</div>
+    <button class="key" id="volToggle"></button>
+    <button class="key" id="rescanBtn">Подключиться к другому компьютеру</button>
+    <button class="key" id="sheetClose">Закрыть</button>
+  </div>
+</div>
 
 <nav class="tabs" id="tabs">
   <button data-v="buttons" class="sel">Кнопки</button>
@@ -467,6 +483,18 @@ async function brightness(delta) {
 $('brDown').addEventListener('click', () => brightness(-10));
 $('brUp').addEventListener('click', () => brightness(10));
 fetch('/r/api/brightness', { headers: { 'X-Remote': KEY } }).then((r) => r.json()).then((d) => { $('brVal').textContent = d.level + '%'; }).catch(() => {});
+
+// ----- Приложение для Android -----
+if (window.TVHubApp) {
+  const m = $('appMenu'), sh = $('sheet'), vt = $('volToggle');
+  const label = () => { vt.textContent = 'Кнопки громкости телефона: ' + (TVHubApp.volumeKeys() ? 'управляют компьютером' : 'как обычно'); };
+  m.classList.remove('hidden');
+  m.addEventListener('click', () => { label(); sh.classList.remove('hidden'); });
+  vt.addEventListener('click', () => { TVHubApp.setVolumeKeys(!TVHubApp.volumeKeys()); label(); buzz(); });
+  $('rescanBtn').addEventListener('click', () => TVHubApp.rescan());
+  $('sheetClose').addEventListener('click', () => sh.classList.add('hidden'));
+  sh.addEventListener('click', (e) => { if (e.target === sh) sh.classList.add('hidden'); });
+}
 
 // ----- Подключение -----
 if (!KEY) {

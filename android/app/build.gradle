@@ -1,0 +1,43 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'ru.tvhub.remote'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'ru.tvhub.remote'
+        minSdk 24
+        targetSdk 35
+        versionCode Integer.parseInt(System.getenv('VERSION_CODE') ?: '1')
+        versionName System.getenv('VERSION_NAME') ?: '1.0'
+    }
+
+    // Ключ подписи создаётся при сборке на GitHub и нигде не хранится (см. android.yml)
+    signingConfigs {
+        release {
+            storeFile file(System.getenv('APK_KEYSTORE') ?: 'missing.jks')
+            storePassword System.getenv('APK_KEY_PASS') ?: ''
+            keyAlias 'tvhub'
+            keyPassword System.getenv('APK_KEY_PASS') ?: ''
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.release
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    // Сканер QR-кодов от Google: камера без отдельного разрешения
+    implementation 'com.google.android.gms:play-services-code-scanner:16.1.0'
+}

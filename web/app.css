@@ -394,3 +394,6 @@ button, input { font: inherit; color: inherit; }
 .br-modal { display: flex; align-items: center; justify-content: center; gap: 2rem; margin-top: 1.6rem; }
 .br-modal .btn { font-size: 1.8rem; padding: 1rem 2rem; min-width: 9rem; }
 .br-modal-val { font-size: 3rem; font-weight: 800; min-width: 9rem; text-align: center; font-variant-numeric: tabular-nums; }
+.app-qr { margin-top: 1rem; }
+.remote-box.in-modal .app-qr .qr { width: 11rem; height: 11rem; }
+.modal-box { max-height: 94vh; overflow: hidden; }

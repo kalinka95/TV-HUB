@@ -779,6 +779,21 @@ async function fillRemoteBox(box, withButtons) {
     '<div class="qr-alt">Если Windows спросит про брандмауэр, разрешите доступ в частных сетях.</div>';
   wrap.append(txt);
   box.append(wrap);
+  // Приложение для Android: пульт открывается сразу, без браузера
+  if (info.app) {
+    const aw = el('div', 'qr-wrap app-qr');
+    const ai = new Image();
+    ai.className = 'qr';
+    ai.alt = 'QR-код приложения';
+    ai.src = '/api/remote/qr.png?' + new URLSearchParams({ t: TOKEN, u: info.app });
+    aw.append(ai);
+    aw.append(el('div', 'qr-text', '<div class="qr-step"><b>Приложение «Пульт TVHub» для Android</b></div>' +
+      '<div class="qr-step">1. Отсканируйте этот код и скачайте файл TVHub-Remote.apk</div>' +
+      '<div class="qr-step">2. Откройте его и разрешите установку из этого источника</div>' +
+      '<div class="qr-step">3. В приложении нажмите «Сканировать QR-код» и наведите на код слева</div>' +
+      '<div class="qr-alt">Кнопки громкости телефона в приложении управляют громкостью компьютера.</div>'));
+    box.append(aw);
+  }
   if (withButtons) {
     const r = el('div', 's-row');
     r.style.background = 'transparent'; r.style.padding = '.6rem 0';

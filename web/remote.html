@@ -116,6 +116,7 @@ header { display: flex; align-items: center; gap: 10px; height: 44px; flex: none
 .mu-state { font-size: 12px; color: var(--muted); letter-spacing: .1em; text-transform: uppercase; font-weight: 700; }
 .mu-title { font-size: 22px; font-weight: 800; line-height: 1.2; padding: 0 8px; }
 .mu-artist { font-size: 15px; color: #c7cede; }
+.mu-info { font-size: 13px; color: #ffd58a; background: #ffffff12; border-radius: 12px; padding: 8px 12px; line-height: 1.4; user-select: text; -webkit-user-select: text; }
 .mu-prog { display: flex; align-items: center; gap: 10px; width: 100%; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; margin-top: 6px; }
 .mu-bar { flex: 1; height: 4px; border-radius: 2px; background: #ffffff26; overflow: hidden; }
 .mu-bar i { display: block; height: 100%; width: 0; background: var(--text); }
@@ -273,6 +274,7 @@ header { display: flex; align-items: center; gap: 10px; height: 44px; flex: none
     <div class="mu-state" id="muState">Загружаю…</div>
     <div class="mu-title" id="muTitle"></div>
     <div class="mu-artist" id="muArtist"></div>
+    <div class="mu-info hidden" id="muInfo"></div>
     <div class="mu-prog hidden" id="muProg"><span id="muPos">0:00</span><div class="mu-bar"><i id="muBar"></i></div><span id="muDur">0:00</span></div>
     <div class="mu-ctrls">
       <button class="mu-b" data-mu="prev" aria-label="Предыдущий"><svg viewBox="0 0 24 24"><path d="M6 5v14"/><path d="M19 5l-10 7 10 7z"/></svg></button>
@@ -457,14 +459,26 @@ async function loadMusic() {
     $('muTitle').textContent = 'Включите музыку';
     $('muArtist').textContent = 'Нажмите «Открыть Яндекс Музыку» и включите «Мою волну»';
   }
+  const info = $('muInfo');
+  info.textContent = !m.title && d.startInfo ? d.startInfo : '';
+  info.classList.toggle('hidden', !info.textContent);
   const src = m.coverVer ? `/r/api/media/cover?k=${encodeURIComponent(KEY)}&v=${m.coverVer}` : (m.coverUrl || '').replace(/^\/\//, 'https://');
   const cov = $('muCover');
-  if (src && cov.dataset.src !== src) {
-    cov.dataset.src = src;
-    cov.innerHTML = `<img src="${src}" alt="">`;
-    $('muBgImg').style.backgroundImage = `url("${src}")`;
-    $('muBgImg').classList.add('on');
+  if (src && cov.dataset.want !== src) {
+    // Сначала загружаем картинку, потом показываем — без пустого квадрата
+    cov.dataset.want = src;
+    const im = new Image();
+    im.onload = () => {
+      if (cov.dataset.want !== src) return;
+      cov.dataset.src = src;
+      cov.innerHTML = '';
+      cov.append(im);
+      $('muBgImg').style.backgroundImage = `url("${src}")`;
+      $('muBgImg').classList.add('on');
+    };
+    im.src = src;
   } else if (!src && cov.dataset.src) {
+    cov.dataset.want = '';
     cov.dataset.src = ''; cov.innerHTML = '<span>♪</span>'; $('muBgImg').classList.remove('on');
   }
   $('muPlayIco').setAttribute('d', playing ? 'M8 5v14M16 5v14' : 'M7 5l12 7-12 7z');
@@ -492,7 +506,7 @@ document.querySelectorAll('[data-mu]').forEach((b) => b.addEventListener('click'
   } catch (e) { toast('Нет связи с компьютером'); }
   setTimeout(loadMusic, 500);
 }));
-setInterval(() => { if (document.visibilityState === 'visible' && !$('v-music').classList.contains('hidden')) loadMusic(); }, 2000);
+setInterval(() => { if (document.visibilityState === 'visible' && !$('v-music').classList.contains('hidden')) loadMusic(); }, 1000);
 setInterval(() => { if (!$('v-music').classList.contains('hidden')) tickMusic(); }, 500);
 document.querySelector('#tabs [data-v="music"]').addEventListener('click', loadMusic);
 if (!$('v-music').classList.contains('hidden')) loadMusic();

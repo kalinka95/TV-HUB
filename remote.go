@@ -302,7 +302,7 @@ func startRemoteServer() {
 	// Музыка на пульте: что играет, управление, показать экран музыки на ноутбуке
 	mux.HandleFunc("GET /r/api/media", remoteAuth(func(w http.ResponseWriter, r *http.Request) {
 		st, ok := getMedia()
-		writeJSON(w, map[string]any{"media": st, "available": ok})
+		writeJSON(w, map[string]any{"media": st, "available": ok, "startInfo": lastWaveInfo()})
 	}))
 	mux.HandleFunc("POST /r/api/media", remoteAuth(func(w http.ResponseWriter, r *http.Request) {
 		var req struct{ Action string }

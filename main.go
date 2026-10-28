@@ -25,7 +25,7 @@ import (
 )
 
 // Версию подставляет сборка на GitHub (-ldflags -X main.appVersion=…)
-var appVersion = "1.3.4"
+var appVersion = "1.3.5"
 
 //go:embed web
 var webFS embed.FS
@@ -467,6 +467,9 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if strings.HasPrefix(resp.Header.Get("Content-Type"), "image/") {
+		w.Header().Set("Cache-Control", "max-age=86400") // обложки и логотипы — из кеша
+	}
 	for _, h := range []string{"Content-Type", "Content-Length", "Content-Range", "Accept-Ranges"} {
 		if v := resp.Header.Get(h); v != "" {
 			w.Header().Set(h, v)
@@ -659,7 +662,7 @@ func startServer() (string, error) {
 	mux.HandleFunc("GET /api/wall/{name}", handleWall)
 	mux.HandleFunc("GET /api/media", apiAuth(func(w http.ResponseWriter, r *http.Request) {
 		st, ok := getMedia()
-		writeJSON(w, map[string]any{"media": st, "available": ok, "music": musicAppInfo()})
+		writeJSON(w, map[string]any{"media": st, "available": ok, "music": musicAppInfo(), "startInfo": lastWaveInfo()})
 	}))
 	mux.HandleFunc("POST /api/media", apiAuth(func(w http.ResponseWriter, r *http.Request) {
 		var req struct{ Action string }

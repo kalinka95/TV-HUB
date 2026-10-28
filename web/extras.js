@@ -585,7 +585,7 @@ function renderMusic() {
   MU.timer = setInterval(() => {
     if (S.screen === 'main' && S.tab === 'music') updateMusic();
     else clearInterval(MU.timer);
-  }, 1500);
+  }, 1000);
   if (!MU.tick) MU.tick = setInterval(tickMusicProgress, 500);
 }
 
@@ -614,13 +614,15 @@ async function updateMusic() {
     const u = coverURL(m);
     if (u && cover.dataset.u !== u) {
       cover.dataset.u = u;
-      cover.innerHTML = `<img src="${u}" alt="">`;
+      const im = new Image();
+      im.onload = () => { if (cover.dataset.u === u) { cover.innerHTML = ''; cover.append(im); } };
+      im.src = u;
       coverColors(u).then(setMusicColors);
     } else if (!u && cover.dataset.u) { cover.dataset.u = ''; cover.innerHTML = '<span class="mu-note">♪</span>'; setMusicColors(null); }
   } else {
     $('muKicker').textContent = r.available === false ? 'Музыка' : 'Сейчас ничего не играет';
     title.textContent = r.available === false ? 'Не получается узнать, что играет' : 'Включите музыку';
-    $('muArtist').textContent = 'Откройте Яндекс Музыку и включите «Мою волну». Кнопки ниже всё равно работают';
+    $('muArtist').textContent = r.startInfo || 'Нажмите «плей» — TVHub откроет Яндекс Музыку и включит «Мою волну»';
   }
   const ico = document.getElementById('muPlayIco');
   if (ico) ico.setAttribute('d', playing ? 'M8 5v14M16 5v14' : 'M7 5l12 7-12 7z');

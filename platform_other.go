@@ -196,5 +196,6 @@ func startMusic() string {
 	log.Printf("start music")
 	return "Включил «Мою волну» (тест)"
 }
-func openVPNApp() error { log.Printf("open vpn app"); return nil }
-func vpnTunnel() string { return "" }
+func openVPNApp() error    { log.Printf("open vpn app"); return nil }
+func vpnTunnel() string    { return "" }
+func lastWaveInfo() string { return "" }

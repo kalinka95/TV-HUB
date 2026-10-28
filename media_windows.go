@@ -92,7 +92,7 @@ while ($true) {
     Start-Sleep -Milliseconds 300
     $tick = 99
   }
-  if ($tick -ge 6) { Emit; $tick = 0 }
+  if ($tick -ge 2) { Emit; $tick = 0 }
   $tick++
   Start-Sleep -Milliseconds 250
 }
@@ -163,6 +163,9 @@ func ensureMediaMonitor() {
 			cover := media.CoverVer
 			if st.Title != media.Title || st.Artist != media.Artist {
 				cover, mediaCover = "", nil // новый трек — старая обложка не подходит
+				if st.Title != "" {
+					go func(s mediaState) { fillCoverFallback(&s) }(st.mediaState) // запасную обложку ищем сразу
+				}
 			}
 			if st.Cover != nil && *st.Cover != "" {
 				if raw, err := base64.StdEncoding.DecodeString(*st.Cover); err == nil && len(raw) > 0 {
@@ -379,86 +382,154 @@ func musicTargets() []cdpTarget {
 	return out
 }
 
-// Нажимает «Моя волна» (или «Воспроизвести») на странице Яндекс Музыки.
-const waveJS = `(() => {
-  const vis = (e) => { const r = e.getBoundingClientRect(); return r.width > 4 && r.height > 4; };
-  const label = (b) => ((b.getAttribute('aria-label') || '') + ' ' + (b.title || '') + ' ' + (b.getAttribute('data-test-id') || '') + ' ' + (b.textContent || '')).toLowerCase();
-  const btns = [...document.querySelectorAll('button,[role=button]')].filter(vis);
+// waveJS(шаг) нажимает на странице Яндекс Музыки: 0 — кнопку «плей» в карточке «Моя волна»,
+// 1 — саму карточку «Моя волна», 2 — кнопку воспроизведения в плеере.
+const waveJS = `((step) => {
   if (navigator.mediaSession && navigator.mediaSession.playbackState === 'playing') return 'playing';
-  let t = btns.find((b) => /моя волна|my ?wave|vibe/.test(label(b)) && /(воспр|play|слуш|запуст|включ)/.test(label(b)));
-  if (!t) {
-    const blk = [...document.querySelectorAll('section,div,a')].find((e) => vis(e) && /^\s*моя волна/i.test(e.textContent || '') && (e.textContent || '').length < 300);
-    if (blk) t = [...blk.querySelectorAll('button,[role=button]')].find(vis) || blk;
+  const vis = (e) => { const r = e.getBoundingClientRect(); return r.width > 4 && r.height > 4; };
+  const label = (b) => ((b.getAttribute('aria-label') || '') + ' ' + (b.title || '') + ' ' + (b.getAttribute('data-test-id') || '') + ' ' + (b.textContent || '')).toLowerCase().replace(/\s+/g, ' ');
+  const isPlay = (b) => /(воспр|play|слуш|запуст|включ|продолж)/.test(label(b)) && !/(пауз|pause|настро|setting)/.test(label(b));
+  const btns = [...document.querySelectorAll('button,[role=button],a')].filter(vis);
+  // Карточка «Моя волна»: самый маленький видимый блок, текст которого начинается с «Моя волна»
+  const blocks = [...document.querySelectorAll('section,div,a,button')].filter((e) => vis(e) && /^\s*(моя волна|my wave)/i.test(e.textContent || ''));
+  blocks.sort((a, b) => (a.textContent || '').length - (b.textContent || '').length);
+  const wave = blocks[0];
+  let t = null;
+  if (step === 0) {
+    t = btns.find((b) => /моя волна|my ?wave|vibe/.test(label(b)) && isPlay(b));
+    if (!t && wave) {
+      const box = wave.closest('section') || wave.parentElement || wave;
+      t = [...box.querySelectorAll('button,[role=button]')].filter(vis).find(isPlay);
+    }
+  } else if (step === 1 && wave) {
+    t = wave.closest('a,button,[role=button]') || wave;
+  } else if (step === 2) {
+    t = btns.find((b) => /(воспроизвести|воспроизведение|play_button|playbutton|play button|^\s*play\s*$)/.test(label(b)) && isPlay(b));
   }
-  if (!t) t = btns.find((b) => /(воспроизвести|воспроизведение|play_button|playbutton|play button|^\s*play\s*$|слушать)/.test(label(b)) && !/(пауз|pause)/.test(label(b)));
-  if (!t) return 'none|' + btns.slice(0, 14).map((b) => label(b).replace(/\s+/g, ' ').trim().slice(0, 30)).filter(Boolean).join(' / ');
+  if (!t) return 'none|' + location.host + location.pathname + '|' + (wave ? 'карточка волны есть' : 'карточки волны нет') + '|' +
+    btns.slice(0, 12).map((b) => label(b).trim().slice(0, 24)).filter(Boolean).join(' / ');
+  t.scrollIntoView({ block: 'center' });
   t.click();
   return 'clicked';
-})()`
+})`
 
-var waveMu sync.Mutex
+var (
+	waveMu     sync.Mutex
+	waveInfoMu sync.Mutex
+	waveInfo   string // что получилось при последней попытке включить музыку
+	waveInfoAt time.Time
+)
 
-// startWave ждёт, пока загрузится Яндекс Музыка, и включает «Мою волну».
+func setWaveInfo(s string) string {
+	waveInfoMu.Lock()
+	waveInfo, waveInfoAt = s, time.Now()
+	waveInfoMu.Unlock()
+	return s
+}
+
+// lastWaveInfo — итог последней попытки, если она была недавно (показываем на экране музыки).
+func lastWaveInfo() string {
+	waveInfoMu.Lock()
+	defer waveInfoMu.Unlock()
+	if time.Since(waveInfoAt) > 5*time.Minute {
+		return ""
+	}
+	return waveInfo
+}
+
+func evalWave(t cdpTarget, step int) string {
+	res, err := cdpCall(t.WS, "Runtime.evaluate", map[string]any{"expression": waveJS + "(" + fmt.Sprint(step) + ")", "returnByValue": true, "userGesture": true})
+	if err != nil {
+		return ""
+	}
+	var r struct {
+		Result struct {
+			Value string `json:"value"`
+		} `json:"result"`
+	}
+	json.Unmarshal(res, &r)
+	return r.Result.Value
+}
+
+func pressKey(t cdpTarget, key, code string, vk int) {
+	for _, typ := range []string{"keyDown", "keyUp"} {
+		p := map[string]any{"type": typ, "key": key, "code": code, "windowsVirtualKeyCode": vk}
+		if typ == "keyDown" && len(key) == 1 {
+			p["text"] = key
+		}
+		cdpCall(t.WS, "Input.dispatchKeyEvent", p)
+	}
+}
+
+// startWave включает «Мою волну» в Яндекс Музыке (не дольше ~15 секунд).
 // Если музыка уже играет — ничего не делает. Возвращает описание результата.
 func startWave() string {
 	if !waveMu.TryLock() {
 		return "Уже включаю музыку…"
 	}
 	defer waveMu.Unlock()
+	setWaveInfo("Включаю «Мою волну»…")
 	playing := func() bool {
 		st, _ := getMedia()
 		return st.Status == "Playing"
 	}
-	time.Sleep(1200 * time.Millisecond)
-	if playing() {
-		return "Музыка играет"
-	}
-	clicks, sawPage, lastLabels := 0, false, ""
-	for i := 0; i < 20 && clicks < 4; i++ {
-		for _, t := range musicTargets() {
-			sawPage = true
-			res, err := cdpCall(t.WS, "Runtime.evaluate", map[string]any{"expression": waveJS, "returnByValue": true, "userGesture": true})
-			if err != nil {
-				continue
-			}
-			var r struct {
-				Result struct {
-					Value string `json:"value"`
-				} `json:"result"`
-			}
-			json.Unmarshal(res, &r)
-			v := r.Result.Value
-			switch {
-			case v == "playing":
-				return "Музыка играет"
-			case v == "clicked":
-				clicks++
-				time.Sleep(2500 * time.Millisecond)
-				if playing() {
-					return "Включил «Мою волну»"
-				}
-			case strings.HasPrefix(v, "none|"):
-				lastLabels = strings.TrimPrefix(v, "none|")
+	waitPlay := func(d time.Duration) bool {
+		for t := time.Now(); time.Since(t) < d; time.Sleep(300 * time.Millisecond) {
+			if playing() {
+				return true
 			}
 		}
-		time.Sleep(time.Second)
+		return false
 	}
-	tapVK(0xB3, true) // последняя попытка — клавиша «плей»
-	time.Sleep(1500 * time.Millisecond)
 	if playing() {
-		return "Музыка играет"
+		return setWaveInfo("")
 	}
-	switch {
-	case !sawPage:
-		log.Printf("музыка: нет страницы Яндекс Музыки для управления")
-		return "Не получилось управлять Яндекс Музыкой. Откройте её кнопкой «Открыть Яндекс Музыку» в TVHub и нажмите «плей» ещё раз"
-	case clicks > 0:
-		log.Printf("музыка: нажал «Моя волна», но музыка не заиграла")
-		return "Нажал «Моя волна», но музыка не заиграла. Возможно, нужно войти в аккаунт Яндекса"
-	default:
-		log.Printf("музыка: не нашёл кнопку «Моя волна»; кнопки на странице: %s", lastLabels)
-		return "Не нашёл кнопку «Моя волна» на странице. Кнопки: " + lastLabels
+	// Ждём, пока страница Яндекс Музыки загрузится (до 8 секунд)
+	var page cdpTarget
+	for t := time.Now(); time.Since(t) < 8*time.Second && page.WS == ""; time.Sleep(400 * time.Millisecond) {
+		for _, x := range musicTargets() {
+			res, err := cdpCall(x.WS, "Runtime.evaluate", map[string]any{"expression": "document.readyState", "returnByValue": true})
+			if err == nil && strings.Contains(string(res), "complete") {
+				page = x
+				break
+			}
+		}
 	}
+	if page.WS == "" {
+		tapVK(0xB3, true) // нет страницы — пробуем клавишу «плей»
+		if waitPlay(2500 * time.Millisecond) {
+			return setWaveInfo("")
+		}
+		return setWaveInfo("Не удалось управлять Яндекс Музыкой: TVHub не видит её страницу. Откройте её кнопкой «Открыть Яндекс Музыку» и нажмите «плей» ещё раз")
+	}
+	time.Sleep(700 * time.Millisecond) // кнопки появляются чуть позже загрузки
+	diag := ""
+	for step := 0; step < 3; step++ {
+		switch v := evalWave(page, step); {
+		case v == "playing":
+			return setWaveInfo("")
+		case v == "clicked":
+			if waitPlay(2500 * time.Millisecond) {
+				return setWaveInfo("")
+			}
+		case strings.HasPrefix(v, "none|"):
+			diag = strings.TrimPrefix(v, "none|")
+		}
+	}
+	// Горячие клавиши Яндекс Музыки: P — воспроизведение, пробел
+	pressKey(page, "p", "KeyP", 0x50)
+	if waitPlay(2 * time.Second) {
+		return setWaveInfo("")
+	}
+	pressKey(page, " ", "Space", 0x20)
+	if waitPlay(2 * time.Second) {
+		return setWaveInfo("")
+	}
+	log.Printf("музыка: «Моя волна» не включилась; %s", diag)
+	if diag == "" {
+		return setWaveInfo("Нажал «Моя волна», но музыка не заиграла. Проверьте, что вы вошли в аккаунт Яндекса")
+	}
+	return setWaveInfo("Не получилось включить «Мою волну». Пришлите этот текст разработчику: " + diag)
 }
 
 func focusPID(pid uint32) bool {

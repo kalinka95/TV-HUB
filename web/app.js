@@ -337,6 +337,11 @@ function renderHome() {
   homeNoticeRow(box);
   const chs = S.channels;
 
+  // Кино и сервисы — главный ряд, первым
+  const apps = S.cfg.apps.map((a) => appCard(a, 'happ'));
+  apps.push(tile('plus', 'Добавить приложение', () => openSettingsAt('app-name'), 'addapp', { kicker: 'Приложения', sub: 'Любой сайт или программа на компьютере' }));
+  box.append(row('Кино и сервисы', apps));
+
   // Избранное и недавнее
   const recent = [];
   const last = chs.find((c) => c.url === S.cfg.lastChannel);
@@ -363,10 +368,6 @@ function renderHome() {
   }
   box.append(row('Телеканалы', items));
 
-  // Приложения
-  const apps = S.cfg.apps.map((a) => appCard(a, 'happ'));
-  apps.push(tile('plus', 'Добавить приложение', () => openSettingsAt('app-name'), 'addapp', { kicker: 'Приложения', sub: 'Любой сайт или программа на компьютере' }));
-  box.append(row('Кино и сервисы', apps));
 
   // Категории
   if (S.groups.length > 1) {
@@ -513,7 +514,9 @@ function renderApps() {
   g.append(add);
 }
 
+let lastAppId = null; // на «Домой» фокус вернётся на это приложение
 async function launch(app) {
+  lastAppId = app.id;
   if (S.screen === 'player') stopPlayback();
   toast(`Открываю «${app.name}»…`, 2500);
   try {
@@ -985,7 +988,10 @@ window.tvHome = function () {
   S.tab = '';
   show('main');
   switchTab('home');
-  focusFirst($('homeRows'));
+  // Фокус — на приложение, из которого вернулись, иначе на первое в «Кино и сервисы»
+  const rows = $('homeRows');
+  rows.scrollTop = 0;
+  if (!(lastAppId && focusByKey('happ:' + lastAppId, $('main')))) focusFirst(rows, '[data-k^="happ:"]');
 };
 
 // ---------- Плеер ----------

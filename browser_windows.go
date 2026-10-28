@@ -358,6 +358,7 @@ func openWebApp(a App) error {
 	if h != 0 {
 		if alive, _, _ := procIsWindow.Call(h); alive != 0 {
 			focusWindow(h)
+			pushEvent(map[string]string{"type": "appShown"})
 			return nil
 		}
 	}
@@ -378,15 +379,33 @@ func openWebApp(a App) error {
 					cdpCall(t.WS, "Page.bringToFront", map[string]any{})
 				}
 				fullscreenTarget(port, t.ID)
+				pushEvent(map[string]string{"type": "appShown"})
 				return nil
 			}
 		}
 	}
 	before := browserWindows()
+	// Edge уже запущен — открываем окно в фоне, за TVHub, и показываем, когда страница загрузится
+	if _, main := profileProcs(dir); main != 0 {
+		if _, port := cdpTargets(dir); port != "" {
+			if ws := browserWS(port); ws != "" {
+				res, err := cdpCall(ws, "Target.createTarget", map[string]any{"url": a.Target, "newWindow": true, "background": true})
+				var t struct {
+					TargetID string `json:"targetId"`
+				}
+				if err == nil && json.Unmarshal(res, &t) == nil && t.TargetID != "" {
+					go revealWhenReady(dir, a, before, t.TargetID)
+					return nil
+				}
+			}
+		}
+	}
+	// Новый Edge открываем за пределами экрана — без белого окна поверх TVHub
 	args := []string{
 		"--user-data-dir=" + dir,
 		"--no-first-run", "--no-default-browser-check",
-		"--start-fullscreen", "--autoplay-policy=no-user-gesture-required",
+		"--window-position=-32000,-32000", "--window-size=1280,720",
+		"--autoplay-policy=no-user-gesture-required",
 		"--remote-debugging-port=0", "--remote-allow-origins=http://127.0.0.1",
 		"--app=" + a.Target,
 	}
@@ -404,35 +423,82 @@ func openWebApp(a App) error {
 		return err
 	}
 	go c.Wait()
-	// Запоминаем новое окно, чтобы в следующий раз показать именно его
-	go func() {
-		for i := 0; i < 60; i++ {
-			time.Sleep(200 * time.Millisecond)
-			for w := range browserWindows() {
-				if !before[w] {
-					rememberAppWindow(a.ID, w)
-					return
-				}
-			}
-		}
-	}()
-	// Новое окно в уже запущенном Edge открывается не на весь экран — разворачиваем сами
-	go func() {
-		for i := 0; i < 40; i++ {
-			time.Sleep(250 * time.Millisecond)
-			list, port := cdpTargets(dir)
-			for _, t := range list {
-				if t.Type == "page" && sameSite(t.URL, a.Target) {
-					fullscreenTarget(port, t.ID)
-					if h := windowOfProfile(dir, t.Title); h != 0 {
-						focusWindow(h)
-					}
-					return
-				}
-			}
-		}
-	}()
+	go revealWhenReady(dir, a, before, "")
 	return nil
+}
+
+// tvhubMonitor — экран, на котором открыт TVHub (туда и выводим окно сервиса).
+func tvhubMonitor() rect {
+	mon, _, _ := procMonitorFromWindow.Call(hwnd, monitorNearest)
+	mi := monitorInfo{CbSize: uint32(unsafe.Sizeof(monitorInfo{}))}
+	procGetMonitorInfo.Call(mon, uintptr(unsafe.Pointer(&mi)))
+	return mi.Monitor
+}
+
+// revealWhenReady ждёт, пока страница сервиса загрузится, и только тогда выводит окно
+// на весь экран. Пока окно грузится, TVHub показывает заставку перехода.
+func revealWhenReady(dir string, a App, before map[uintptr]bool, targetID string) {
+	defer pushEvent(map[string]string{"type": "appShown"})
+	start := time.Now()
+	var port string
+	var t cdpTarget
+	for time.Since(start) < 12*time.Second {
+		list, p := cdpTargets(dir)
+		port = p
+		for _, x := range list {
+			if x.Type == "page" && ((targetID != "" && x.ID == targetID) || (targetID == "" && sameSite(x.URL, a.Target))) {
+				t = x
+			}
+		}
+		if t.WS != "" {
+			res, err := cdpCall(t.WS, "Runtime.evaluate", map[string]any{"expression": "document.readyState", "returnByValue": true})
+			s := string(res)
+			if err == nil && (strings.Contains(s, `"complete"`) || (strings.Contains(s, `"interactive"`) && time.Since(start) > 4*time.Second)) {
+				break
+			}
+		}
+		time.Sleep(300 * time.Millisecond)
+	}
+	time.Sleep(450 * time.Millisecond) // даём странице отрисоваться
+	r := tvhubMonitor()
+	moved := false
+	if port != "" && t.ID != "" {
+		if ws := browserWS(port); ws != "" {
+			if res, err := cdpCall(ws, "Browser.getWindowForTarget", map[string]any{"targetId": t.ID}); err == nil {
+				var w struct {
+					WindowID int `json:"windowId"`
+				}
+				json.Unmarshal(res, &w)
+				if w.WindowID != 0 {
+					cdpCall(ws, "Browser.setWindowBounds", map[string]any{"windowId": w.WindowID, "bounds": map[string]any{"windowState": "normal"}})
+					cdpCall(ws, "Browser.setWindowBounds", map[string]any{"windowId": w.WindowID, "bounds": map[string]any{
+						"left": r.Left, "top": r.Top, "width": r.Right - r.Left, "height": r.Bottom - r.Top}})
+					_, err := cdpCall(ws, "Browser.setWindowBounds", map[string]any{"windowId": w.WindowID, "bounds": map[string]any{"windowState": "fullscreen"}})
+					moved = err == nil
+				}
+			}
+		}
+	}
+	var h uintptr
+	for i := 0; i < 15 && h == 0; i++ {
+		for w := range browserWindows() {
+			if !before[w] {
+				h = w
+			}
+		}
+		if h == 0 {
+			time.Sleep(100 * time.Millisecond)
+		}
+	}
+	if h == 0 {
+		return
+	}
+	if !moved { // DevTools недоступен — переносим окно на экран сами
+		procSetWindowPos.Call(h, 0, uintptr(r.Left), uintptr(r.Top), uintptr(r.Right-r.Left), uintptr(r.Bottom-r.Top), swpNoZOrder|swpShowWindow)
+		procShowWindow.Call(h, 3) // SW_MAXIMIZE
+	}
+	rememberAppWindow(a.ID, h)
+	focusWindow(h)
 }
 
 // pauseWebApps — на «Домой»: пауза во всех сервисах, кроме музыки.

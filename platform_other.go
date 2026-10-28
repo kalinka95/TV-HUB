@@ -20,7 +20,11 @@ func appDataDir() string {
 	return filepath.Join(os.TempDir(), "tvhub-dev")
 }
 
-func launchApp(a App) error       { log.Printf("launch %s (%s) %s", a.Name, a.Type, a.Target); return nil }
+func launchApp(a App) error {
+	log.Printf("launch %s (%s) %s", a.Name, a.Type, a.Target)
+	go func() { time.Sleep(1500 * time.Millisecond); pushEvent(map[string]string{"type": "appShown"}) }()
+	return nil
+}
 func systemAction(a string) error { log.Printf("system %s", a); return nil }
 func setAutostart(on bool) error  { log.Printf("autostart %v", on); return nil }
 

@@ -420,3 +420,16 @@ button, input { font: inherit; color: inherit; }
 .theme-modal { margin-top: 1.4rem; text-align: left; min-width: 52rem; }
 .theme-modal .toggle { background: var(--surface-2); }
 .theme-modal .note { color: var(--muted); font-size: 1.1rem; line-height: 1.5; margin-top: .8rem; }
+
+/* ---------- Переход к приложению ---------- */
+.launch { position: absolute; inset: 0; z-index: 25; display: grid; place-items: center; opacity: 0; transition: opacity .3s ease;
+  background: radial-gradient(ellipse 80% 70% at 50% 45%, color-mix(in srgb, var(--lc) 38%, #0a0c11), #0a0c11 75%); }
+.launch.in { opacity: 1; }
+.launch.out { opacity: 0; }
+.launch-in { text-align: center; transform: scale(.96); transition: transform .5s cubic-bezier(.2,.8,.2,1); }
+.launch.in .launch-in { transform: scale(1); }
+.launch-sub { font-size: 1.3rem; letter-spacing: .2em; text-transform: uppercase; color: #ffffffa6; font-weight: 600; }
+.launch-name { font-size: 6rem; font-weight: 800; letter-spacing: -0.03em; margin: 1rem 0 2.6rem; text-shadow: 0 1rem 4rem #0008; }
+.launch-bar { width: 22rem; height: .3rem; margin: 0 auto; border-radius: .2rem; background: #ffffff1f; overflow: hidden; }
+.launch-bar i { display: block; width: 35%; height: 100%; border-radius: .2rem; background: #fff; animation: launchBar 1.2s ease-in-out infinite; }
+@keyframes launchBar { 0% { transform: translateX(-110%); } 100% { transform: translateX(320%); } }

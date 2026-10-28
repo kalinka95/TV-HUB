@@ -518,7 +518,7 @@ let lastAppId = null; // на «Домой» фокус вернётся на э
 async function launch(app) {
   lastAppId = app.id;
   if (S.screen === 'player') stopPlayback();
-  toast(`Открываю «${app.name}»…`, 2500);
+  showLaunch(app);
   try {
     const r = await api.post('/api/launch', { id: app.id });
     if (!r.ok) toast('Не удалось открыть: ' + r.error, 5000);
@@ -905,6 +905,7 @@ function listenEvents() {
     else if (ev.type === 'brightness') onBrightnessEvent(ev);
     else if (ev.type === 'home') window.tvHome();
     else if (ev.type === 'music') window.tvMusic();
+    else if (ev.type === 'appShown') hideLaunch(500);
     else if (ev.type === 'key') {
       const key = KEYS[ev.key] || ev.key;
       if (key.length === 1 && cur && cur.tagName === 'INPUT' && /[0-9 ]/.test(key)) { cur.setRangeText(key, cur.selectionStart, cur.selectionEnd, 'end'); return; }
@@ -969,6 +970,32 @@ function show(name) {
   if (name === 'keytest') { $('ktLog').innerHTML = ''; $('ktBig').textContent = 'Нажмите любую кнопку на пульте'; $('ktAction').textContent = ''; }
 }
 
+// ---------- Заставка перехода к приложению ----------
+
+let launchTimer;
+function showLaunch(app) {
+  const l = $('launch');
+  const c = app.color || '#4f8cff';
+  l.style.setProperty('--lc', c);
+  $('launchName').textContent = app.name;
+  $('launchSub').textContent = app.type === 'exe' ? 'Запускаю программу' : 'Открываю';
+  l.classList.remove('hidden', 'out');
+  void l.offsetWidth;
+  l.classList.add('in');
+  clearTimeout(launchTimer);
+  // Сайты сообщают, когда окно готово; программы — просто скрываем через пару секунд
+  launchTimer = setTimeout(() => hideLaunch(0), app.type === 'web' ? 15000 : 3500);
+}
+function hideLaunch(delay) {
+  const l = $('launch');
+  if (l.classList.contains('hidden')) return;
+  clearTimeout(launchTimer);
+  launchTimer = setTimeout(() => {
+    l.classList.add('out');
+    setTimeout(() => { l.classList.add('hidden'); l.classList.remove('in', 'out'); }, 400);
+  }, delay);
+}
+
 // Вызывается с пульта: показать экран «Музыка»
 window.tvMusic = function () {
   hideSaver();
@@ -982,6 +1009,7 @@ window.tvMusic = function () {
 // Вызывается из Go, когда нажата кнопка «Домой» на пульте
 window.tvHome = function () {
   hideSaver();
+  hideLaunch(0);
   if (!$('modal').classList.contains('hidden')) closeModal();
   if (S.screen === 'player') stopPlayback();
   mainFocus.k = null;

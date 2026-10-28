@@ -400,6 +400,10 @@ func hasArg(a string) bool {
 func platformPreInit() bool {
 	if hasArg("--wait-previous") {
 		waitPrevious()
+		// Прежний экземпляр мог сохранить настройки, пока закрывался — перечитываем
+		cfgMu.Lock()
+		loadConfig()
+		cfgMu.Unlock()
 	}
 	cfgMu.Lock()
 	admin := cfg.Settings.RunAsAdmin

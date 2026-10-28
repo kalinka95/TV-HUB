@@ -637,38 +637,69 @@ function coverURL(m) {
   return '';
 }
 
-// Главные цвета обложки: насыщенные и разные по оттенку
+// Главные цвета обложки: насыщенные и разные по оттенку. Работает с любой обложкой —
+// у тёмных и серых обложек цвета берутся из того, что есть, и делаются ярче.
+function rgbToHsl(r, g, b) {
+  r /= 255; g /= 255; b /= 255;
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), l = (mx + mn) / 2;
+  if (mx === mn) return [0, 0, l];
+  const d = mx - mn, s = l > 0.5 ? d / (2 - mx - mn) : d / (mx + mn);
+  let h = mx === r ? (g - b) / d + (g < b ? 6 : 0) : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  return [h * 60, s, l];
+}
+const hsl = (h, s, l) => `hsl(${Math.round(((h % 360) + 360) % 360)}, ${Math.round(s * 100)}%, ${Math.round(l * 100)}%)`;
+
+function paletteFromPixels(d) {
+  const buckets = new Map();
+  let tw = 0, ts = 0, tl = 0, hx = 0, hy = 0;
+  for (let i = 0; i < d.length; i += 4) {
+    if (d[i + 3] < 128) continue;
+    const [h, s, l] = rgbToHsl(d[i], d[i + 1], d[i + 2]);
+    tl += l; tw++;
+    if (l < 0.06 || l > 0.97 || s < 0.06) continue; // почти чёрный, белый или серый
+    const w = (0.2 + s * 2) * (1 - Math.abs(l - 0.5));
+    ts += s * w;
+    hx += Math.cos(h * Math.PI / 180) * w; hy += Math.sin(h * Math.PI / 180) * w;
+    const key = Math.round(h / 24) % 15;
+    const e = buckets.get(key) || { w: 0, x: 0, y: 0, s: 0, l: 0 };
+    e.w += w; e.x += Math.cos(h * Math.PI / 180) * w; e.y += Math.sin(h * Math.PI / 180) * w; e.s += s * w; e.l += l * w;
+    buckets.set(key, e);
+  }
+  const avgL = tw ? tl / tw : 0.5;
+  // Совсем бесцветная обложка — спокойные холодные тона с оттенком её яркости
+  if (!buckets.size) {
+    const l = 0.34 + avgL * 0.2;
+    return [hsl(220, 0.35, l), hsl(255, 0.3, l - 0.06), hsl(195, 0.32, l + 0.04)];
+  }
+  const list = [...buckets.values()].sort((a, b) => b.w - a.w).map((e) => ({
+    h: (Math.atan2(e.y, e.x) * 180 / Math.PI + 360) % 360, s: e.s / e.w, l: e.l / e.w, w: e.w,
+  }));
+  // Берём до трёх цветов, заметно разных по оттенку
+  const picked = [];
+  for (const c of list) {
+    if (picked.every((p) => Math.min(Math.abs(p.h - c.h), 360 - Math.abs(p.h - c.h)) > 28)) picked.push(c);
+    if (picked.length === 3) break;
+  }
+  // Не хватает разных цветов — добавляем соседние оттенки главного
+  const base = picked[0];
+  const shifts = [38, -38, 70];
+  for (let i = 0; picked.length < 3; i++) {
+    picked.push({ h: base.h + shifts[i], s: base.s, l: base.l + (i ? -0.08 : 0.06) });
+  }
+  // Делаем цвета сочными: насыщенность и яркость подтягиваем к хорошему диапазону
+  return picked.map((c) => hsl(c.h, Math.min(0.95, Math.max(0.55, c.s * 1.25)), Math.min(0.62, Math.max(0.42, c.l))));
+}
+
 function coverColors(src) {
   return new Promise((resolve) => {
     const img = new Image();
     img.onload = () => {
       try {
         const c = document.createElement('canvas');
-        c.width = c.height = 32;
-        const g = c.getContext('2d');
-        g.drawImage(img, 0, 0, 32, 32);
-        const d = g.getImageData(0, 0, 32, 32).data;
-        const buckets = new Map();
-        for (let i = 0; i < d.length; i += 4) {
-          const [r, gg, b] = [d[i], d[i + 1], d[i + 2]];
-          const mx = Math.max(r, gg, b), mn = Math.min(r, gg, b);
-          const l = (mx + mn) / 510, s = mx === mn ? 0 : (mx - mn) / (255 - Math.abs(mx + mn - 255));
-          if (l < 0.2 || l > 0.92 || s < 0.15) continue; // слишком тёмные, светлые и серые не берём
-          let h = 0;
-          if (mx !== mn) {
-            if (mx === r) h = ((gg - b) / (mx - mn)) % 6; else if (mx === gg) h = (b - r) / (mx - mn) + 2; else h = (r - gg) / (mx - mn) + 4;
-            h = (h * 60 + 360) % 360;
-          }
-          const key = Math.round(h / 30) % 12;
-          const e = buckets.get(key) || { n: 0, r: 0, g: 0, b: 0, w: 0 };
-          const w = 0.3 + s * 2;
-          e.n++; e.w += w; e.r += r * w; e.g += gg * w; e.b += b * w;
-          buckets.set(key, e);
-        }
-        const top = [...buckets.values()].sort((a, b) => b.w - a.w).slice(0, 3)
-          .map((e) => `rgb(${Math.round(e.r / e.w)}, ${Math.round(e.g / e.w)}, ${Math.round(e.b / e.w)})`);
-        while (top.length && top.length < 3) top.push(top[top.length - 1]);
-        resolve(top.length ? top : null);
+        c.width = c.height = 48;
+        const g = c.getContext('2d', { willReadFrequently: true });
+        g.drawImage(img, 0, 0, 48, 48);
+        resolve(paletteFromPixels(g.getImageData(0, 0, 48, 48).data));
       } catch (e) { resolve(null); }
     };
     img.onerror = () => resolve(null);
@@ -681,7 +712,7 @@ function setMusicColors(cols) {
   const def = ['#fc3f1d', '#8b5cf6', '#3b5bdb'];
   const c = cols || def;
   root.setProperty('--mu1', c[0]); root.setProperty('--mu2', c[1]); root.setProperty('--mu3', c[2]);
-  $('muCover').style.boxShadow = cols ? `0 2rem 6rem ${c[0].replace('rgb', 'rgba').replace(')', ', .45)')}` : '';
+  $('muCover').style.boxShadow = cols ? `0 2rem 6rem color-mix(in srgb, ${c[0]} 45%, transparent)` : '';
 }
 
 // Переливающийся фон в цветах обложки — только на вкладке «Музыка»
@@ -758,7 +789,7 @@ function renderExtraSettings(inner) {
     else if (!r.results.length) results.append(el('div', 'note', 'Ничего не найдено'));
     r.results.forEach((city, i) => {
       const b = btn(`${city.name}${city.region ? ', ' + city.region : ''}${city.country ? ' (' + city.country + ')' : ''}`, async () => {
-        c.settings.city = city; await saveCfg(); toast(`Город: ${city.name}`); loadWeather(); keepFocus(renderSettings);
+        c.settings.city = city; if (await saveCfg()) toast(`Город: ${city.name}`); loadWeather(); keepFocus(renderSettings);
       }, 'city:' + i);
       results.append(b);
     });
@@ -785,6 +816,7 @@ function renderExtraSettings(inner) {
   sv.append(sr);
   inner.append(sv);
 
+  eqSection(inner);
   themeSection(inner);
   updateSection(inner);
 
@@ -805,6 +837,59 @@ function renderExtraSettings(inner) {
     ]);
   }, 'set-admin'));
   inner.append(ad);
+}
+
+// ---------- Звук: эквалайзер (Equalizer APO) ----------
+
+const EQS = { d: null, loading: false };
+
+function eqSection(inner) {
+  const sec = el('div', 's-section');
+  sec.append(el('h2', '', 'Звук: эквалайзер'));
+  inner.append(sec);
+  const d = EQS.d;
+  if (!d) {
+    sec.append(el('p', 'note', 'Загружаю…'));
+    if (!EQS.loading) {
+      EQS.loading = true;
+      api.get('/api/eq').then((r) => { EQS.d = r; }).catch(() => { EQS.d = { error: 'Не удалось узнать настройки звука' }; })
+        .finally(() => { EQS.loading = false; if (S.tab === 'settings') keepFocus(renderSettings); });
+    }
+    return;
+  }
+  if (d.error && !d.eq) { sec.append(el('p', 'note', esc(d.error))); return; }
+  const e = d.eq, inst = d.status && d.status.installed;
+  const apply = async (body) => {
+    try {
+      const r = await api.post('/api/eq', body);
+      EQS.d = r;
+      if (r.error) toast(r.error, 6000);
+    } catch (err) { toast('Не получилось: ' + err.message); }
+    keepFocus(renderSettings);
+  };
+  if (!inst) {
+    sec.append(el('p', 'note', 'В Windows нет общего эквалайзера, поэтому TVHub управляет бесплатной программой <b>Equalizer APO</b>. ' +
+      'Нажмите «Установить», в установщике выберите «Да» и «Далее», в конце отметьте устройство, через которое звук идёт на телевизор (HDMI), и перезагрузите компьютер.'));
+    const r = el('div', 's-row');
+    r.style.background = 'transparent'; r.style.padding = '.2rem 0';
+    r.append(btn('Установить Equalizer APO', async () => {
+      const x = await api.post('/api/eq', { download: true }).catch((err) => ({ ok: false, error: err.message }));
+      if (!x.ok) toast(x.error || 'Не получилось', 6000);
+      setTimeout(() => { EQS.d = null; if (S.tab === 'settings') keepFocus(renderSettings); }, 20000);
+    }, 'eq-install', 'primary'));
+    r.append(btn('Проверить ещё раз', () => { EQS.d = null; keepFocus(renderSettings); }, 'eq-recheck'));
+    sec.append(r);
+    return;
+  }
+  sec.append(el('p', 'note', 'Тонкая настройка по полосам — на пульте в телефоне, вкладка «Звук». Если звук не меняется, откройте «Configurator» из папки Equalizer APO, отметьте устройство, через которое идёт звук, и перезагрузите компьютер.'));
+  sec.append(toggleRow('Эквалайзер включён', !!e.on, () => apply({ on: !e.on }), 'eq-on'));
+  const seg = el('div', 'seg');
+  seg.style.flexWrap = 'wrap';
+  d.presets.forEach((p) => seg.append(btn(p.name, () => apply({ preset: p.id }), 'eq:' + p.id, e.on && e.preset === p.id ? 'sel' : '')));
+  const r = el('div', 's-row');
+  r.style.background = 'transparent'; r.style.padding = '.2rem 0';
+  r.append(seg);
+  sec.append(r);
 }
 
 // ---------- Обновления ----------

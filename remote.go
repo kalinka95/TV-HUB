@@ -299,6 +299,8 @@ func startRemoteServer() {
 	mux.HandleFunc("GET /r/api/brightness", remoteAuth(func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]any{"level": currentBrightness()})
 	}))
+	// Эквалайзер звука компьютера
+	mux.HandleFunc("/r/api/eq", remoteAuth(handleEQ))
 	// Музыка на пульте: что играет, управление, показать экран музыки на ноутбуке
 	mux.HandleFunc("GET /r/api/media", remoteAuth(func(w http.ResponseWriter, r *http.Request) {
 		st, ok := getMedia()

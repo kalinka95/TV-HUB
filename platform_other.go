@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -199,3 +200,12 @@ func startMusic() string {
 func openVPNApp() error    { log.Printf("open vpn app"); return nil }
 func vpnTunnel() string    { return "" }
 func lastWaveInfo() string { return "" }
+
+func eqSystemStatus() map[string]any {
+	return map[string]any{"installed": os.Getenv("TVHUB_EQ_DIR") != "", "dir": os.Getenv("TVHUB_EQ_DIR")}
+}
+func applyEQ(e EQ) error {
+	log.Printf("eq: %s", strings.ReplaceAll(eqConfigText(e), "\n", " | "))
+	return nil
+}
+func openEQDownload() error { log.Printf("eq download"); return nil }

@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 	"unsafe"
 
@@ -27,29 +28,216 @@ func findVPN() string {
 	p := strings.Trim(cfg.Settings.VPNPath, `" `)
 	cfgMu.Unlock()
 	if p != "" {
-		if _, err := os.Stat(p); err == nil {
-			return p
+		if st, err := os.Stat(p); err == nil {
+			if !st.IsDir() {
+				return p
+			}
+			// Указана папка — ищем Happ.exe внутри неё
+			for _, pat := range []string{`Happ*.exe`, `happ*.exe`, `*\Happ*.exe`, `*.exe`} {
+				if f := pickHappExe(filepath.Join(p, pat)); f != "" {
+					return f
+				}
+			}
 		}
 	}
+	return findVPNAuto()
+}
+
+var (
+	vpnAutoMu   sync.Mutex
+	vpnAutoPath string
+	vpnAutoAt   time.Time
+)
+
+// findVPNAuto ищет Happ, если путь в настройках не указан: запущенная программа, ссылки happ://,
+// список установленных программ, обычные папки, ярлыки в «Пуске» и на рабочем столе.
+// Найденный путь запоминается на минуту, чтобы не искать при каждой проверке состояния.
+func findVPNAuto() string {
+	vpnAutoMu.Lock()
+	defer vpnAutoMu.Unlock()
+	if vpnAutoPath != "" && time.Since(vpnAutoAt) < time.Minute {
+		if _, err := os.Stat(vpnAutoPath); err == nil {
+			return vpnAutoPath
+		}
+	}
+	if vpnAutoPath == "" && time.Since(vpnAutoAt) < 15*time.Second {
+		return "" // недавно искали и не нашли
+	}
+	p := searchHapp()
+	vpnAutoPath, vpnAutoAt = p, time.Now()
+	if p != "" {
+		log.Printf("VPN: Happ найден: %s", p)
+	}
+	return p
+}
+
+func searchHapp() string {
+	okExe := func(f string) string {
+		f = strings.Trim(strings.TrimSpace(f), `"`)
+		if i := strings.LastIndex(strings.ToLower(f), ".exe"); i >= 0 {
+			f = f[:i+4]
+		}
+		if st, err := os.Stat(f); err == nil && !st.IsDir() && strings.HasSuffix(strings.ToLower(f), ".exe") {
+			return f
+		}
+		return ""
+	}
+	// 1. Happ уже запущен — берём путь у процесса
+	for _, pr := range allProcs() {
+		if strings.HasPrefix(strings.ToLower(pr.exe), "happ") && pr.path != "" {
+			if f := okExe(pr.path); f != "" {
+				return f
+			}
+		}
+	}
+	// 2. Happ регистрирует ссылки happ:// — в реестре записано, какой программой их открывать
+	for _, root := range []registry.Key{registry.CURRENT_USER, registry.LOCAL_MACHINE} {
+		k, err := registry.OpenKey(root, `Software\Classes\happ\shell\open\command`, registry.QUERY_VALUE)
+		if err != nil {
+			continue
+		}
+		cmd, _, _ := k.GetStringValue("")
+		k.Close()
+		if m := exeInCmd.FindString(cmd); m != "" {
+			if f := okExe(m); f != "" {
+				return f
+			}
+		}
+	}
+	// 3. Список установленных программ (то, что видно в «Приложения и возможности»)
+	for _, loc := range []struct {
+		root registry.Key
+		path string
+	}{
+		{registry.CURRENT_USER, `Software\Microsoft\Windows\CurrentVersion\Uninstall`},
+		{registry.LOCAL_MACHINE, `Software\Microsoft\Windows\CurrentVersion\Uninstall`},
+		{registry.LOCAL_MACHINE, `Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall`},
+	} {
+		k, err := registry.OpenKey(loc.root, loc.path, registry.ENUMERATE_SUB_KEYS)
+		if err != nil {
+			continue
+		}
+		names, _ := k.ReadSubKeyNames(-1)
+		k.Close()
+		for _, n := range names {
+			sk, err := registry.OpenKey(loc.root, loc.path+`\`+n, registry.QUERY_VALUE)
+			if err != nil {
+				continue
+			}
+			name, _, _ := sk.GetStringValue("DisplayName")
+			icon, _, _ := sk.GetStringValue("DisplayIcon")
+			dir, _, _ := sk.GetStringValue("InstallLocation")
+			sk.Close()
+			if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(name)), "happ") {
+				continue
+			}
+			if f := okExe(strings.SplitN(icon, ",", 2)[0]); f != "" && !strings.Contains(strings.ToLower(filepath.Base(f)), "unins") {
+				return f
+			}
+			if dir = strings.Trim(dir, `" `); dir != "" {
+				for _, pat := range []string{`Happ*.exe`, `*\Happ*.exe`} {
+					if f := pickHappExe(filepath.Join(dir, pat)); f != "" {
+						return f
+					}
+				}
+			}
+		}
+	}
+	// 4. Обычные папки установки
 	var roots []string
-	for _, env := range []string{"ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA", "APPDATA"} {
+	for _, env := range []string{"ProgramFiles", "ProgramW6432", "ProgramFiles(x86)", "LOCALAPPDATA", "APPDATA"} {
 		if v := os.Getenv(env); v != "" {
 			roots = append(roots, v, filepath.Join(v, "Programs"))
 		}
 	}
 	for _, r := range roots {
-		for _, pat := range []string{`Happ*\Happ*.exe`, `happ*\happ*.exe`, `Happ*\*\Happ*.exe`} {
-			m, _ := filepath.Glob(filepath.Join(r, pat))
-			for _, f := range m {
-				low := strings.ToLower(filepath.Base(f))
-				if strings.Contains(low, "unins") || strings.Contains(low, "update") || strings.Contains(low, "helper") {
-					continue
-				}
+		for _, pat := range []string{`Happ*\Happ*.exe`, `Happ*\*\Happ*.exe`, `*\Happ*.exe`} {
+			if f := pickHappExe(filepath.Join(r, pat)); f != "" && strings.HasPrefix(strings.ToLower(filepath.Base(f)), "happ") {
 				return f
 			}
 		}
 	}
+	// 5. Ярлыки в меню «Пуск» и на рабочем столе
+	var lnks []string
+	for _, d := range []string{
+		filepath.Join(os.Getenv("APPDATA"), `Microsoft\Windows\Start Menu\Programs`),
+		filepath.Join(os.Getenv("ProgramData"), `Microsoft\Windows\Start Menu\Programs`),
+		filepath.Join(os.Getenv("USERPROFILE"), "Desktop"),
+		filepath.Join(os.Getenv("PUBLIC"), "Desktop"),
+	} {
+		for _, pat := range []string{`Happ*.lnk`, `*\Happ*.lnk`} {
+			m, _ := filepath.Glob(filepath.Join(d, pat))
+			lnks = append(lnks, m...)
+		}
+	}
+	for _, l := range lnks {
+		if f := okExe(lnkTarget(l)); f != "" {
+			return f
+		}
+	}
 	return ""
+}
+
+var exeInCmd = regexp.MustCompile(`(?i)[a-z]:\\[^"*?<>|]+?\.exe`)
+
+// lnkTarget достаёт путь к программе из ярлыка Windows (.lnk) — ищем в файле строку «X:\…\*.exe».
+func lnkTarget(lnk string) string {
+	b, err := os.ReadFile(lnk)
+	if err != nil || len(b) > 1<<20 {
+		return ""
+	}
+	if m := exeInCmd.Find(b); m != nil { // путь в однобайтовой кодировке
+		return string(m)
+	}
+	// путь в UTF-16
+	u := make([]uint16, len(b)/2)
+	for i := range u {
+		u[i] = uint16(b[2*i]) | uint16(b[2*i+1])<<8
+	}
+	for _, off := range []int{0, 1} {
+		if off == 1 && len(b) > 2 {
+			u = make([]uint16, (len(b)-1)/2)
+			for i := range u {
+				u[i] = uint16(b[2*i+1]) | uint16(b[2*i+2])<<8
+			}
+		}
+		if m := exeInCmd.FindString(string(utf16Decode(u))); m != "" {
+			return m
+		}
+	}
+	return ""
+}
+
+func utf16Decode(u []uint16) []rune {
+	out := make([]rune, 0, len(u))
+	for _, c := range u {
+		if c == 0 {
+			out = append(out, '"') // разделитель строк
+			continue
+		}
+		out = append(out, rune(c))
+	}
+	return out
+}
+
+// pickHappExe — первый подходящий exe по шаблону (без установщиков и служебных программ).
+func pickHappExe(pattern string) string {
+	m, _ := filepath.Glob(pattern)
+	var fallback string
+	for _, f := range m {
+		low := strings.ToLower(filepath.Base(f))
+		if strings.Contains(low, "unins") || strings.Contains(low, "update") || strings.Contains(low, "helper") ||
+			strings.Contains(low, "crash") || strings.Contains(low, "setup") || strings.Contains(low, "service") {
+			continue
+		}
+		if strings.HasPrefix(low, "happ") {
+			return f
+		}
+		if fallback == "" {
+			fallback = f
+		}
+	}
+	return fallback
 }
 
 // processPIDs — идентификаторы запущенных процессов с таким именем файла.

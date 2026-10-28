@@ -34,6 +34,7 @@ const ICONS = {
   power: '<svg viewBox="0 0 24 24"><path d="M12 3v9"/><path d="M6.3 6.8a8 8 0 1 0 11.4 0"/></svg>',
   restart: '<svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.3-5.7"/><path d="M4 4v5h5"/></svg>',
   exit: '<svg viewBox="0 0 24 24"><path d="M14 4h5v16h-5"/><path d="M10 8l-4 4 4 4"/><path d="M6 12h10"/></svg>',
+  star: '<svg viewBox="0 0 24 24"><path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"/></svg>',
   tv: '<svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M8 2l4 4 4-4"/></svg>',
   plus: '<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>',
   phone: '<svg viewBox="0 0 24 24"><rect x="6" y="2" width="12" height="20" rx="2.5"/><path d="M11 18h2"/><circle cx="12" cy="10" r="2.6"/></svg>',
@@ -74,8 +75,8 @@ function toast(msg, ms = 3000) {
 }
 
 async function saveCfg() {
-  try { await api.post('/api/config', S.cfg); }
-  catch (e) { toast('Не удалось сохранить настройки: ' + e.message); }
+  try { await api.post('/api/config', S.cfg); return true; }
+  catch (e) { toast('Не удалось сохранить настройки: ' + e.message); return false; }
 }
 
 function tickClock() {
@@ -371,44 +372,28 @@ function renderHome() {
   apps.push(tile('plus', 'Добавить приложение', () => openSettingsAt('app-name'), 'addapp', { kicker: 'Приложения', sub: 'Любой сайт или программа на компьютере' }));
   box.append(row('Кино и сервисы', apps));
 
-  // Избранное и недавнее
-  const recent = [];
-  const last = chs.find((c) => c.url === S.cfg.lastChannel);
-  if (last) recent.push(last);
-  for (const u of S.cfg.favorites) {
-    const c = chs.find((x) => x.url === u);
-    if (c && c !== last) recent.push(c);
-  }
-  if (recent.length) {
-    const favList = chs.filter((c) => isFav(c.url));
-    box.append(row('Продолжить и избранное', recent.map((c) => channelCard(c, isFav(c.url) && favList.length > 1 ? favList : chs, 'rec', c === last ? 'recent' : ''))));
-  }
-
-  // Каналы
+  // Телеканалы: отдельно «Продолжить» (последний канал), дальше только избранные
   const items = [];
+  const last = chs.find((c) => c.url === S.cfg.lastChannel);
+  const favList = chs.filter((c) => isFav(c.url));
   if (S.chLoading) items.push(el('div', 'empty-note', 'Загружаю список каналов…'));
   else if (S.chError) items.push(el('div', 'empty-note', 'Не удалось загрузить каналы: ' + esc(S.chError)));
-  else chs.slice(0, 18).forEach((c) => items.push(channelCard(c, chs, 'top')));
-  if (!S.chLoading && chs.length) {
-    items.push(tile('tv', `Все каналы (${chs.length})`, () => { focusTab('tv'); }, 'allch', { kicker: 'Телеканалы', sub: 'Список по категориям и поиск' }));
+  else {
+    if (last) {
+      const c = channelCard(last, isFav(last.url) && favList.length > 1 ? favList : chs, 'cont', '');
+      c.classList.add('cont-card');
+      c.prepend(el('div', 'cont-tag', '▶ Продолжить'));
+      c._info.kicker = 'Продолжить просмотр';
+      items.push(c, el('div', 'row-sep'));
+    }
+    favList.forEach((c) => items.push(channelCard(c, favList.length > 1 ? favList : chs, 'fav')));
+    if (!favList.length && chs.length) {
+      items.push(tile('star', 'Избранных каналов пока нет', () => focusTab('tv'), 'favhint', { kicker: 'Избранное', sub: 'В списке каналов нажмите «Меню» на канале — он появится здесь' }));
+    }
+    if (chs.length) items.push(tile('tv', `Все каналы (${chs.length})`, () => { focusTab('tv'); }, 'allch', { kicker: 'Телеканалы', sub: 'Список по категориям и поиск' }));
+    else items.push(tile('plus', 'Добавить плейлист', () => openSettingsAt('pl-name'), 'addpl', { kicker: 'Телеканалы', sub: 'Вставьте ссылку на M3U-плейлист от вашего IPTV-провайдера' }));
   }
-  if (!S.chLoading && !chs.length) {
-    items.push(tile('plus', 'Добавить плейлист', () => openSettingsAt('pl-name'), 'addpl', { kicker: 'Телеканалы', sub: 'Вставьте ссылку на M3U-плейлист от вашего IPTV-провайдера' }));
-  }
-  box.append(row('Телеканалы', items));
-
-
-  // Категории
-  if (S.groups.length > 1) {
-    box.append(row('Категории', S.groups.slice(0, 30).map((g) => {
-      const b = el('button', 'f card group-card');
-      b.dataset.k = 'grp:' + g.name;
-      b.innerHTML = `<div class="label">${esc(g.name)}</div><div class="count">${g.count} каналов</div>`;
-      b._act = () => { S.tvGroup = g.name; S.search = ''; focusTab('tv', true); };
-      b._info = { kicker: 'Категория', title: g.name, sub: `${g.count} каналов`, color: hueColor(g.name) };
-      return b;
-    })));
-  }
+  box.append(row(favList.length ? 'Избранные каналы' : 'Телеканалы', items));
 
   // Система
   box.append(row('Система', [
@@ -426,7 +411,7 @@ function renderHome() {
     tile('exit', 'Закрыть TVHub', () => confirmSys('exit', 'Закрыть TVHub?'), 'exit', {}),
   ]));
 
-  if (!recent.length && !cur) setWelcomeHero();
+  if (!last && !favList.length && !cur) setWelcomeHero();
 }
 
 function focusTab(name, focusContent = true) {
@@ -951,6 +936,7 @@ function listenEvents() {
     else if (ev.type === 'update') onUpdateEvent(ev);
     else if (ev.type === 'brightness') onBrightnessEvent(ev);
     else if (ev.type === 'vpn') refreshVPN();
+    else if (ev.type === 'eq') { if (EQS.d && EQS.d.eq) { EQS.d.eq = ev.eq; if (S.tab === 'settings' && !$('panel-settings').classList.contains('hidden')) keepFocus(renderSettings); } }
     else if (ev.type === 'home') window.tvHome();
     else if (ev.type === 'music') window.tvMusic();
     else if (ev.type === 'screen') window.tvShow(ev.name);

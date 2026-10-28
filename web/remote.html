@@ -94,6 +94,27 @@ header { display: flex; align-items: center; gap: 10px; height: 44px; flex: none
 }
 .text-box textarea:focus { border-color: var(--accent); }
 .key.primary { background: var(--accent); }
+/* Эквалайзер */
+.eq-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.eq-switch { width: 54px; height: 32px; border-radius: 16px; background: var(--surface-2); position: relative; flex: none; transition: background .2s; }
+.eq-switch i { position: absolute; top: 4px; left: 4px; width: 24px; height: 24px; border-radius: 50%; background: var(--muted); transition: transform .2s, background .2s; }
+.eq-switch.on { background: var(--accent); }
+.eq-switch.on i { transform: translateX(22px); background: #fff; }
+.eq-setup { background: var(--surface); border-radius: 14px; padding: 14px; margin-bottom: 14px; display: grid; gap: 12px; }
+.eq-presets { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+.eq-presets button { padding: 9px 13px; border-radius: 18px; background: var(--surface); font-size: 13.5px; font-weight: 600; color: var(--muted); }
+.eq-presets button.sel { background: var(--accent); color: #fff; }
+.eq-bands { display: grid; grid-template-columns: repeat(10, 1fr); gap: 4px; background: var(--surface); border-radius: 16px; padding: 14px 6px 10px; margin-bottom: 12px; touch-action: none; }
+.eq-band { display: flex; flex-direction: column; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); }
+.eq-band b { font-size: 11px; color: var(--text); font-variant-numeric: tabular-nums; min-height: 14px; }
+.eq-track { position: relative; width: 100%; height: 200px; display: flex; justify-content: center; }
+.eq-track::before { content: ""; position: absolute; top: 0; bottom: 0; width: 4px; border-radius: 2px; background: var(--surface-2); }
+.eq-track::after { content: ""; position: absolute; left: 20%; right: 20%; top: 50%; height: 1px; background: var(--line); }
+.eq-fill { position: absolute; width: 4px; border-radius: 2px; background: linear-gradient(var(--accent-2), var(--accent)); }
+.eq-thumb { position: absolute; width: 22px; height: 22px; margin-top: -11px; border-radius: 50%; background: #fff; box-shadow: 0 2px 8px #0008; }
+.eq-off .eq-fill, .eq-off .eq-thumb { opacity: .4; }
+.eq-msg { margin-top: 10px; min-height: 18px; }
+.eq-msg.err { color: #ffb4a8; }
 .note { color: var(--muted); font-size: 13px; line-height: 1.5; margin: 0; }
 
 /* Меню приложения для Android */
@@ -110,6 +131,8 @@ header { display: flex; align-items: center; gap: 10px; height: 44px; flex: none
 .mu-bgimg { position: fixed; inset: -20%; background-size: cover; background-position: center; filter: blur(60px) saturate(1.4) brightness(.55); opacity: 0; transition: opacity 1s, background-image 1s; z-index: 0; pointer-events: none; }
 .mu > :not(.mu-bgimg) { position: relative; z-index: 1; }
 .mu-bgimg.on { opacity: .9; }
+.mu-bgimg.on { animation: muDrift 14s ease-in-out infinite alternate; }
+@keyframes muDrift { 0% { transform: scale(1.1) translate(0, 0) rotate(0); } 33% { transform: scale(1.35) translate(6%, -5%) rotate(8deg); } 66% { transform: scale(1.2) translate(-6%, 5%) rotate(-6deg); } 100% { transform: scale(1.4) translate(4%, 6%) rotate(4deg); } }
 .mu-cover { width: min(66vw, 34vh); aspect-ratio: 1; border-radius: 22px; overflow: hidden; display: grid; place-items: center;
   background: linear-gradient(135deg, #fc3f1d, #8b5cf6); box-shadow: 0 18px 50px #0009; font-size: 80px; margin-bottom: 10px; }
 .mu-cover img { width: 100%; height: 100%; object-fit: cover; }
@@ -183,6 +206,7 @@ header { display: flex; align-items: center; gap: 10px; height: 44px; flex: none
   <button data-v="digits">Цифры</button>
   <button data-v="text">Текст</button>
   <button data-v="music">Музыка</button>
+  <button data-v="eq">Звук</button>
   <button data-v="wins">Окна</button>
 </nav>
 
@@ -290,6 +314,22 @@ header { display: flex; align-items: center; gap: 10px; height: 44px; flex: none
       <button class="key" data-mu="open">Открыть Яндекс Музыку</button>
     </div>
   </div>
+</section>
+
+<!-- Эквалайзер -->
+<section class="view hidden" id="v-eq">
+  <div class="eq-head">
+    <div class="wins-title">Эквалайзер компьютера</div>
+    <button class="eq-switch" id="eqOn" aria-label="Включить эквалайзер"><i></i></button>
+  </div>
+  <div class="eq-setup hidden" id="eqSetup">
+    <p class="note">Для эквалайзера нужна бесплатная программа <b>Equalizer APO</b>. TVHub скачает и запустит установщик на компьютере. В установщике нажмите «Да» и «Далее», в конце отметьте устройство, через которое звук идёт на телевизор (обычно HDMI или название телевизора), и перезагрузите компьютер.</p>
+    <button class="key primary" id="eqInstall">Установить Equalizer APO</button>
+  </div>
+  <div class="eq-presets" id="eqPresets"></div>
+  <div class="eq-bands" id="eqBands"></div>
+  <div class="row"><button class="key" id="eqReset">Сбросить</button></div>
+  <p class="note eq-msg" id="eqMsg"></p>
 </section>
 
 <!-- Открытые окна -->
@@ -592,6 +632,96 @@ setInterval(() => {
   if (document.visibilityState === 'visible' && !$('v-wins').classList.contains('hidden')) loadWins();
 }, 3000);
 document.querySelector('#tabs [data-v="wins"]').addEventListener('click', loadWins);
+
+// ----- Эквалайзер -----
+const EQ = { st: null, timer: 0, dragging: false };
+async function eqReq(body) {
+  try {
+    const r = await fetch('/r/api/eq', body ? { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Remote': KEY }, body: JSON.stringify(body) } : { headers: { 'X-Remote': KEY } });
+    if (!r.ok) throw new Error(r.status);
+    return await r.json();
+  } catch (e) { $('eqMsg').textContent = 'Нет связи с компьютером'; $('eqMsg').className = 'note eq-msg err'; return null; }
+}
+const fmtHz = (f) => f >= 1000 ? (f / 1000) + 'к' : String(f);
+function renderEQ(d) {
+  if (!d) return;
+  EQ.st = d;
+  const e = d.eq, inst = d.status && d.status.installed;
+  $('eqOn').classList.toggle('on', !!e.on);
+  $('eqSetup').classList.toggle('hidden', !!inst);
+  $('eqBands').classList.toggle('eq-off', !e.on);
+  const pr = $('eqPresets');
+  pr.innerHTML = '';
+  d.presets.forEach((p) => {
+    const b = document.createElement('button');
+    b.textContent = p.name;
+    b.classList.toggle('sel', e.on && e.preset === p.id);
+    b.onclick = async () => { buzz(); renderEQ(await eqReq({ preset: p.id })); };
+    pr.append(b);
+  });
+  if (!EQ.dragging) {
+    const box = $('eqBands');
+    if (box.children.length !== d.bands.length) {
+      box.innerHTML = '';
+      d.bands.forEach((f, i) => {
+        const band = document.createElement('div');
+        band.className = 'eq-band';
+        band.innerHTML = `<b></b><div class="eq-track"><div class="eq-fill"></div><div class="eq-thumb"></div></div><span>${fmtHz(f)}</span>`;
+        const tr = band.querySelector('.eq-track');
+        const setFrom = (ev) => {
+          const r = tr.getBoundingClientRect();
+          let v = 12 - ((ev.clientY - r.top) / r.height) * 24;
+          v = Math.max(-12, Math.min(12, Math.round(v * 2) / 2));
+          EQ.st.eq.gains[i] = v;
+          drawBand(band, v);
+          clearTimeout(EQ.timer);
+          EQ.timer = setTimeout(sendGains, 120);
+        };
+        tr.addEventListener('pointerdown', (ev) => { EQ.dragging = true; tr.setPointerCapture(ev.pointerId); if (!EQ.st.eq.on) { EQ.st.eq.on = true; $('eqOn').classList.add('on'); $('eqBands').classList.remove('eq-off'); } setFrom(ev); });
+        tr.addEventListener('pointermove', (ev) => { if (EQ.dragging) setFrom(ev); });
+        const end = () => { if (!EQ.dragging) return; EQ.dragging = false; clearTimeout(EQ.timer); sendGains(); };
+        tr.addEventListener('pointerup', end);
+        tr.addEventListener('pointercancel', end);
+        box.append(band);
+      });
+    }
+    [...box.children].forEach((band, i) => drawBand(band, e.gains[i] || 0));
+  }
+  const msg = $('eqMsg');
+  if (d.error) { msg.textContent = d.error; msg.className = 'note eq-msg err'; }
+  else if (!inst) { msg.textContent = d.status && d.status.download === 'downloading' ? 'Скачиваю установщик на компьютер…' : ''; msg.className = 'note eq-msg'; }
+  else { msg.textContent = e.on ? 'Тяните ползунки — звук на компьютере меняется сразу' : 'Эквалайзер выключен'; msg.className = 'note eq-msg'; }
+}
+function drawBand(band, v) {
+  const pct = (12 - v) / 24 * 100;
+  band.querySelector('.eq-thumb').style.top = pct + '%';
+  const f = band.querySelector('.eq-fill');
+  f.style.top = Math.min(pct, 50) + '%';
+  f.style.height = Math.abs(pct - 50) + '%';
+  band.querySelector('b').textContent = (v > 0 ? '+' : '') + v;
+}
+let eqSending = false, eqPending = false;
+async function sendGains() {
+  if (eqSending) { eqPending = true; return; }
+  eqSending = true;
+  const d = await eqReq({ gains: EQ.st.eq.gains, on: true });
+  eqSending = false;
+  if (eqPending) { eqPending = false; sendGains(); return; }
+  if (d && !EQ.dragging) renderEQ(d);
+}
+$('eqOn').onclick = async () => { buzz(); if (!EQ.st) return; renderEQ(await eqReq({ on: !EQ.st.eq.on })); };
+$('eqReset').onclick = async () => { buzz(); renderEQ(await eqReq({ preset: 'flat' })); };
+$('eqInstall').onclick = async () => {
+  buzz();
+  const d = await eqReq({ download: true });
+  if (d && d.ok) toast('Установщик откроется на компьютере', 4000);
+  else if (d) toast(d.error || 'Не получилось', 5000);
+  setTimeout(async () => renderEQ(await eqReq()), 1500);
+};
+async function loadEQ() { renderEQ(await eqReq()); }
+document.querySelector('#tabs [data-v="eq"]').addEventListener('click', loadEQ);
+if (!$('v-eq').classList.contains('hidden')) loadEQ();
+
 if (!$('v-wins').classList.contains('hidden')) loadWins();
 
 // ----- Яркость -----

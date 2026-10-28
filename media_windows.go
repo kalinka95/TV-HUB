@@ -39,6 +39,7 @@ $null = [Windows.Storage.Streams.DataReader, Windows.Storage.Streams, ContentTyp
 $mgr = Await ([Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager]::RequestAsync()) ([Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager])
 if (-not $mgr) { [Console]::Out.WriteLine('{"ok":false}'); exit }
 $lastKey = ''
+$myPos = 0; $rawLast = -1; $lastT = $null
 $coverTries = 0
 $haveCover = $false
 $cmdFile = $env:TVHUB_MEDIA_CMD
@@ -52,9 +53,25 @@ function Emit {
     $o.title = [string]$p.Title; $o.artist = [string]$p.Artist; $o.album = [string]$p.AlbumTitle
     $o.status = [string]$pb.PlaybackStatus
     $o.app = [string]$s.SourceAppUserModelId
-    $o.pos = $tl.Position.TotalSeconds; $o.dur = $tl.EndTime.TotalSeconds
+    $o.dur = $tl.EndTime.TotalSeconds
     $key = "$($p.Title)|$($p.Artist)"
-    if ($key -ne $script:lastKey) { $script:lastKey = $key; $script:coverTries = 0; $script:haveCover = $false; $o.cover = '' }
+    if ($key -ne $script:lastKey) { $script:lastKey = $key; $script:coverTries = 0; $script:haveCover = $false; $o.cover = ''; $script:myPos = 0; $script:rawLast = -1 }
+    # Позиция трека. Многие плееры (и Яндекс Музыка) сообщают её только в начале трека,
+    # поэтому досчитываем сами: от времени, когда плеер её сообщил, и своим таймером.
+    $t = [DateTime]::UtcNow
+    $dt = 0; if ($script:lastT) { $dt = ($t - $script:lastT).TotalSeconds }
+    $script:lastT = $t
+    $playing = $o.status -eq 'Playing'
+    if ($playing -and $dt -gt 0 -and $dt -lt 5) { $script:myPos += $dt }
+    $raw = $tl.Position.TotalSeconds
+    if ($raw -ne $script:rawLast) {
+      $script:rawLast = $raw
+      $pos = $raw
+      try { $age = ([DateTimeOffset]::UtcNow - $tl.LastUpdatedTime).TotalSeconds; if ($playing -and $age -gt 0 -and $age -lt 3600) { $pos += $age } } catch {}
+      $script:myPos = $pos
+    }
+    $o.pos = $script:myPos
+    if ($o.dur -gt 0 -and $o.pos -gt $o.dur) { $o.pos = $o.dur }
     # Обложка часто приходит позже названия — пробуем несколько раз
     if (-not $script:haveCover -and $script:coverTries -lt 8 -and $p.Thumbnail) {
       $script:coverTries++
@@ -382,40 +399,60 @@ func musicTargets() []cdpTarget {
 	return out
 }
 
-// waveJS(шаг) нажимает на странице Яндекс Музыки: 0 — кнопку «плей» в карточке «Моя волна»,
-// 1 — саму карточку «Моя волна», 2 — кнопку воспроизведения в плеере.
+// waveJS(шаг) ищет на странице Яндекс Музыки, куда нажать, и возвращает координаты для клика мышью:
+// 0 — кнопка «плей» рядом с «Моя волна» в основной части страницы, 1 — сам блок «Моя волна»,
+// 2 — пункт «Моя волна» в боковом меню (открывает страницу волны), 3 — «плей» в плеере внизу.
+// Элемент при необходимости прокручивается в видимую область; waveRestoreJS возвращает прокрутку.
 const waveJS = `((step) => {
   if (navigator.mediaSession && navigator.mediaSession.playbackState === 'playing') return 'playing';
-  const vis = (e) => { const r = e.getBoundingClientRect(); return r.width > 4 && r.height > 4; };
+  const vis = (e) => { const r = e.getBoundingClientRect(); const st = getComputedStyle(e); return r.width > 4 && r.height > 4 && st.visibility !== 'hidden' && st.display !== 'none'; };
   const label = (b) => ((b.getAttribute('aria-label') || '') + ' ' + (b.title || '') + ' ' + (b.getAttribute('data-test-id') || '') + ' ' + (b.textContent || '')).toLowerCase().replace(/\s+/g, ' ');
-  const isPlay = (b) => /(воспр|play|слуш|запуст|включ|продолж)/.test(label(b)) && !/(пауз|pause|настро|setting)/.test(label(b));
+  const isPlay = (b) => /(воспр|play|слуш|запуст|включ|продолж)/.test(label(b)) && !/(пауз|pause|настро|setting|плейлист|playlist)/.test(label(b));
+  const inNav = (e) => !!e.closest('nav,aside,header,[class*=idebar],[class*=Navbar],[class*=navbar],[class*=NavBar]');
+  const inBar = (e) => !!e.closest('footer,[class*=layerBar],[class*=layerbar],[data-test-id*=PLAYERBAR]');
   const btns = [...document.querySelectorAll('button,[role=button],a')].filter(vis);
-  // Карточка «Моя волна»: самый маленький видимый блок, текст которого начинается с «Моя волна»
-  const blocks = [...document.querySelectorAll('section,div,a,button')].filter((e) => vis(e) && /^\s*(моя волна|my wave)/i.test(e.textContent || ''));
-  blocks.sort((a, b) => (a.textContent || '').length - (b.textContent || '').length);
-  const wave = blocks[0];
+  const waveText = (e) => /^\s*(моя волна|my wave)/i.test(e.textContent || '');
   let t = null;
   if (step === 0) {
-    t = btns.find((b) => /моя волна|my ?wave|vibe/.test(label(b)) && isPlay(b));
-    if (!t && wave) {
-      const box = wave.closest('section') || wave.parentElement || wave;
-      t = [...box.querySelectorAll('button,[role=button]')].filter(vis).find(isPlay);
-    }
-  } else if (step === 1 && wave) {
-    t = wave.closest('a,button,[role=button]') || wave;
+    t = btns.find((b) => !inNav(b) && /моя волна|my ?wave|vibe/.test(label(b)) && isPlay(b));
+    if (!t) t = btns.filter((b) => !inNav(b) && !inBar(b) && isPlay(b)).find((b) => {
+      for (let e = b.parentElement, i = 0; e && i < 6; e = e.parentElement, i++) if (/(моя волна|my wave)/i.test(e.textContent || '') && (e.textContent || '').length < 400) return true;
+      return false;
+    });
+  } else if (step === 1) {
+    const blocks = [...document.querySelectorAll('main *,[class*=ontent] *')].filter((e) => vis(e) && !inNav(e) && waveText(e));
+    blocks.sort((a, b) => (a.textContent || '').length - (b.textContent || '').length);
+    if (blocks[0]) t = blocks[0].closest('a,button,[role=button]') || blocks[0];
   } else if (step === 2) {
-    t = btns.find((b) => /(воспроизвести|воспроизведение|play_button|playbutton|play button|^\s*play\s*$)/.test(label(b)) && isPlay(b));
+    t = btns.find((b) => inNav(b) && /моя волна|my ?wave/.test(label(b)));
+    if (t) { t.click(); return 'nav'; }
+  } else if (step === 3) {
+    t = btns.find((b) => inBar(b) && isPlay(b)) || btns.find((b) => !inNav(b) && /(воспроизвести|воспроизведение|play_button|playbutton|play button|^\s*play\s*$)/.test(label(b)) && isPlay(b));
   }
-  if (!t) return 'none|' + location.host + location.pathname + '|' + (wave ? 'карточка волны есть' : 'карточки волны нет') + '|' +
-    btns.slice(0, 12).map((b) => label(b).trim().slice(0, 24)).filter(Boolean).join(' / ');
-  // Нажимаем без прокрутки страницы и возвращаем прокрутку на место, если страница сдвинулась сама
-  const scrolled = [];
-  for (let e = t.parentElement; e; e = e.parentElement) if (e.scrollTop) scrolled.push([e, e.scrollTop]);
-  const y = window.scrollY;
-  t.click();
-  setTimeout(() => { scrolled.forEach(([e, s]) => { e.scrollTop = s; }); if (window.scrollY !== y) window.scrollTo(0, y); }, 400);
-  return 'clicked';
+  if (!t) {
+    const main = btns.filter((b) => !inNav(b)).map((b) => label(b).trim().slice(0, 22)).filter(Boolean);
+    return 'none|' + location.host + location.pathname + '|' + 'шаг ' + step + '|' + main.slice(0, 16).join(' / ');
+  }
+  document.querySelectorAll('[data-tvhub-target]').forEach((e) => e.removeAttribute('data-tvhub-target'));
+  t.setAttribute('data-tvhub-target', '1');
+  // Запоминаем прокрутку, чтобы вернуть страницу на место после нажатия
+  const saved = [];
+  for (let e = t.parentElement; e; e = e.parentElement) if (e.scrollHeight > e.clientHeight) saved.push([e, e.scrollTop]);
+  window.__tvhubScroll = { saved, y: window.scrollY };
+  let r = t.getBoundingClientRect();
+  if (r.top < 0 || r.bottom > innerHeight || r.left < 0 || r.right > innerWidth) { t.scrollIntoView({ block: 'center', behavior: 'instant' }); r = t.getBoundingClientRect(); }
+  return 'at|' + Math.round(r.left + r.width / 2) + '|' + Math.round(r.top + r.height / 2);
 })`
+
+const waveRestoreJS = `(() => { const s = window.__tvhubScroll; if (!s) return; s.saved.forEach(([e, v]) => { e.scrollTop = v; }); window.scrollTo(0, s.y); window.__tvhubScroll = null; })()`
+const waveJSClickJS = `(() => { const e = document.querySelector('[data-tvhub-target]'); if (e) e.click(); return !!e; })()`
+
+func mouseClick(t cdpTarget, x, y int) {
+	cdpCall(t.WS, "Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": x, "y": y})
+	time.Sleep(120 * time.Millisecond) // кнопка в карточке может появляться только при наведении
+	cdpCall(t.WS, "Input.dispatchMouseEvent", map[string]any{"type": "mousePressed", "x": x, "y": y, "button": "left", "clickCount": 1})
+	cdpCall(t.WS, "Input.dispatchMouseEvent", map[string]any{"type": "mouseReleased", "x": x, "y": y, "button": "left", "clickCount": 1})
+}
 
 var (
 	waveMu     sync.Mutex
@@ -508,12 +545,34 @@ func startWave() string {
 	}
 	time.Sleep(700 * time.Millisecond) // кнопки появляются чуть позже загрузки
 	diag := ""
-	for step := 0; step < 3; step++ {
-		switch v := evalWave(page, step); {
+	navDone := false
+	for step := 0; step < 4; step++ {
+		v := evalWave(page, step)
+		switch {
 		case v == "playing":
 			return setWaveInfo("")
-		case v == "clicked":
-			if waitPlay(2500 * time.Millisecond) {
+		case v == "nav":
+			// Открыли страницу «Моя волна» через меню — ищем кнопку заново уже на ней
+			if !navDone {
+				navDone = true
+				time.Sleep(2500 * time.Millisecond)
+				if playing() {
+					return setWaveInfo("")
+				}
+				step = -1
+			}
+		case strings.HasPrefix(v, "at|"):
+			var x, y int
+			fmt.Sscanf(strings.ReplaceAll(strings.TrimPrefix(v, "at|"), "|", " "), "%d %d", &x, &y)
+			mouseClick(page, x, y)
+			ok := waitPlay(2500 * time.Millisecond)
+			if !ok && !playing() {
+				// Клик мышью не сработал — нажимаем на элемент из самой страницы
+				cdpCall(page.WS, "Runtime.evaluate", map[string]any{"expression": waveJSClickJS, "userGesture": true})
+				ok = waitPlay(2500 * time.Millisecond)
+			}
+			cdpCall(page.WS, "Runtime.evaluate", map[string]any{"expression": waveRestoreJS})
+			if ok {
 				return setWaveInfo("")
 			}
 		case strings.HasPrefix(v, "none|"):

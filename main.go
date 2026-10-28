@@ -25,7 +25,7 @@ import (
 )
 
 // Версию подставляет сборка на GitHub (-ldflags -X main.appVersion=…)
-var appVersion = "1.3.6"
+var appVersion = "1.3.7"
 
 //go:embed web
 var webFS embed.FS
@@ -65,6 +65,7 @@ type Settings struct {
 	DarkSites         bool   `json:"darkSites,omitempty"`  // Edge затемняет сайты без своей тёмной темы
 	VPNForRu          bool   `json:"vpnForRu,omitempty"`   // true = российские сервисы тоже через VPN
 	VPNHidden         bool   `json:"vpnHidden,omitempty"`
+	EQ                *EQ    `json:"eq,omitempty"` // эквалайзер (Equalizer APO)
 }
 
 type Config struct {
@@ -77,6 +78,7 @@ type Config struct {
 	RemoteKey      string     `json:"remoteKey"` // секрет в ссылке пульта на телефоне
 	Reminders      []Reminder `json:"reminders,omitempty"`
 	YaMusicAdded   bool       `json:"yaMusicAdded,omitempty"`
+	ClearCity      bool       `json:"clearCity,omitempty"` // только в запросе: убрать город
 }
 
 const tvUA = "Mozilla/5.0 (SMART-TV; LINUX; Tizen 6.0) AppleWebKit/537.36 (KHTML, like Gecko) 85.0.4183.93/6.0 TV Safari/537.36"
@@ -116,13 +118,23 @@ func configPath() string { return filepath.Join(dataDir, "config.json") }
 
 func loadConfig() {
 	cfg = defaultConfig()
-	b, err := os.ReadFile(configPath())
-	if err != nil {
-		return
-	}
 	var c Config
-	if err := json.Unmarshal(b, &c); err != nil {
-		log.Printf("config.json повреждён, использую настройки по умолчанию: %v", err)
+	ok := false
+	// Если основной файл пропал или повреждён — берём резервную копию
+	for _, f := range []string{configPath(), configPath() + ".bak"} {
+		b, err := os.ReadFile(f)
+		if err != nil {
+			continue
+		}
+		c = Config{}
+		if err := json.Unmarshal(b, &c); err != nil || c.Playlists == nil {
+			log.Printf("%s повреждён: %v", filepath.Base(f), err)
+			continue
+		}
+		ok = true
+		break
+	}
+	if !ok {
 		return
 	}
 	if c.Favorites == nil {
@@ -150,9 +162,26 @@ func saveConfigLocked() error {
 	b, _ := json.MarshalIndent(cfg, "", "  ")
 	tmp := configPath() + ".tmp"
 	if err := os.WriteFile(tmp, b, 0o644); err != nil {
+		log.Printf("настройки не сохранены: %v", err)
 		return err
 	}
-	return os.Rename(tmp, configPath())
+	// Windows не даёт заменить файл, пока его кто-то читает (антивирус, второй экземпляр) — пробуем ещё
+	var err error
+	for i := 0; i < 10; i++ {
+		if err = os.Rename(tmp, configPath()); err == nil {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if err != nil {
+		if err = os.WriteFile(configPath(), b, 0o644); err != nil {
+			log.Printf("настройки не сохранены: %v", err)
+			return err
+		}
+		os.Remove(tmp)
+	}
+	os.WriteFile(configPath()+".bak", b, 0o644)
+	return nil
 }
 
 // ---------- M3U ----------
@@ -536,6 +565,13 @@ func handleSaveConfig(w http.ResponseWriter, r *http.Request) {
 	c.Reminders = cfg.Reminders
 	c.Settings.Brightness = cfg.Settings.Brightness
 	c.Settings.DarkSites = cfg.Settings.DarkSites
+	c.Settings.EQ = cfg.Settings.EQ
+	if c.Settings.City == nil { // город сбрасывается только явно, не из-за устаревшей копии настроек
+		c.Settings.City = cfg.Settings.City
+	}
+	if c.ClearCity {
+		c.Settings.City, c.ClearCity = nil, false
+	}
 	prevEPG := cfg.Settings.EPGURL + "|" + cfg.ActivePlaylist
 	cfg = c
 	err := saveConfigLocked()
@@ -652,6 +688,7 @@ func startServer() (string, error) {
 	mux.HandleFunc("POST /api/update", apiAuth(handleUpdateAction))
 	mux.HandleFunc("/api/whatsnew", apiAuth(handleWhatsNew))
 	mux.HandleFunc("/api/brightness", apiAuth(handleBrightness))
+	mux.HandleFunc("/api/eq", apiAuth(handleEQ))
 	mux.HandleFunc("/api/theme", apiAuth(handleTheme))
 	mux.HandleFunc("GET /api/notices", apiAuth(handleNotices))
 	mux.HandleFunc("POST /api/notices/read", apiAuth(handleNoticesRead))

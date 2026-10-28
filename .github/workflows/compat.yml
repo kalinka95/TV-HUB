@@ -1,0 +1,24 @@
+name: Совместимость с версией 1.2.0
+
+# TVHub 1.2.0 ещё проверяет подпись (TVHub.exe.sig). Чтобы он смог сам обновиться,
+# один раз прикрепляем подпись к выпуску v1.2.1. Новые версии проверяют контрольную сумму.
+on:
+  push:
+    branches: [main]
+    paths: ['.github/compat/**', '.github/workflows/compat.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  attach:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Прикрепить подпись к v1.2.1
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp .github/compat/v1.2.1-TVHub.exe.sig TVHub.exe.sig
+          gh release upload v1.2.1 TVHub.exe.sig --clobber --repo "$GITHUB_REPOSITORY"

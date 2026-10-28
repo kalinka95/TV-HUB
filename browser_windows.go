@@ -106,7 +106,10 @@ func devtoolsPort(dir string) string {
 var cdpHTTP = &http.Client{Timeout: 3 * time.Second}
 
 func cdpTargets(dir string) ([]cdpTarget, string) {
-	port := devtoolsPort(dir)
+	return cdpTargetsPort(devtoolsPort(dir))
+}
+
+func cdpTargetsPort(port string) ([]cdpTarget, string) {
 	if port == "" {
 		return nil, ""
 	}

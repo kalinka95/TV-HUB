@@ -226,6 +226,14 @@ func mediaAction(a string) error {
 	case "playpause", "next", "prev":
 		ensureMediaMonitor()
 		mediaMu.Lock()
+		idle := media.Title == ""
+		mediaMu.Unlock()
+		if a == "playpause" && idle {
+			// Ничего не играет — Windows некому передать «плей». Включаем «Мою волну» сами.
+			go startMusic()
+			return nil
+		}
+		mediaMu.Lock()
 		ok := mediaCmd != nil
 		mediaMu.Unlock()
 		if ok && os.WriteFile(mediaCmdFile(), []byte(a), 0o644) == nil {
@@ -309,16 +317,119 @@ var (
 // launchMusic открывает Яндекс Музыку: приложение, если установлено, иначе сайт.
 // Кнопка «Домой» музыку не останавливает.
 func launchMusic(a App) error {
+	defer func() { go startWave() }() // сразу включаем «Мою волну», если ничего не играет
 	if exe := findYandexMusic(); exe != "" {
-		for _, p := range allProcs() { // уже запущено — показываем окно
-			if strings.EqualFold(p.path, exe) && focusPID(p.pid) {
-				return nil
-			}
+		if p := ymDesktopProc(exe); p != 0 && focusPID(p) {
+			return nil
 		}
-		return windows.ShellExecute(0, windows.StringToUTF16Ptr("open"), windows.StringToUTF16Ptr(exe), nil,
-			windows.StringToUTF16Ptr(filepath.Dir(exe)), 1)
+		// Порт отладки — чтобы TVHub мог нажать «Моя волна» (если приложение это позволяет)
+		return windows.ShellExecute(0, windows.StringToUTF16Ptr("open"), windows.StringToUTF16Ptr(exe),
+			windows.StringToUTF16Ptr("--remote-debugging-port="+ymDesktopPort), windows.StringToUTF16Ptr(filepath.Dir(exe)), 1)
 	}
 	return openWebApp(a)
+}
+
+const ymDesktopPort = "9333"
+
+func ymDesktopProc(exe string) uint32 {
+	for _, p := range allProcs() {
+		if strings.EqualFold(p.path, exe) && !strings.Contains(processCmdline(p.pid), "--type=") {
+			return p.pid
+		}
+	}
+	return 0
+}
+
+// startMusic — «плей», когда ничего не играет: открыть Яндекс Музыку (если закрыта) и включить волну.
+func startMusic() {
+	running := len(musicTargets()) > 0
+	if exe := findYandexMusic(); exe != "" && ymDesktopProc(exe) != 0 {
+		running = true
+	}
+	if !running {
+		launchMusic(yandexMusicApp) // сама запустит волну
+		return
+	}
+	startWave()
+}
+
+// musicTargets — страницы Яндекс Музыки, которыми можно управлять: сайт в окне TVHub и приложение.
+func musicTargets() []cdpTarget {
+	var out []cdpTarget
+	web, _ := cdpTargets(profileDir("browser-music"))
+	desk, _ := cdpTargetsPort(ymDesktopPort)
+	for _, t := range append(web, desk...) {
+		if t.Type == "page" && t.WS != "" && !strings.HasPrefix(t.URL, "devtools:") {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+// Нажимает «Моя волна» (или «Воспроизвести») на странице Яндекс Музыки.
+const waveJS = `(() => {
+  const vis = (e) => { const r = e.getBoundingClientRect(); return r.width > 4 && r.height > 4; };
+  const label = (b) => ((b.getAttribute('aria-label') || '') + ' ' + (b.title || '') + ' ' + (b.getAttribute('data-test-id') || '') + ' ' + (b.textContent || '')).toLowerCase();
+  const btns = [...document.querySelectorAll('button,[role=button]')].filter(vis);
+  if (navigator.mediaSession && navigator.mediaSession.playbackState === 'playing') return 'playing';
+  let t = btns.find((b) => /моя волна|my ?wave|vibe/.test(label(b)) && /(воспр|play|слуш|запуст|включ)/.test(label(b)));
+  if (!t) {
+    const blk = [...document.querySelectorAll('section,div,a')].find((e) => vis(e) && /^\s*моя волна/i.test(e.textContent || '') && (e.textContent || '').length < 300);
+    if (blk) t = [...blk.querySelectorAll('button,[role=button]')].find(vis) || blk;
+  }
+  if (!t) t = btns.find((b) => /(воспроизвести|воспроизведение|play_button|playbutton|play button|^\s*play\s*$|слушать)/.test(label(b)) && !/(пауз|pause)/.test(label(b)));
+  if (!t) return 'none';
+  t.click();
+  return 'clicked';
+})()`
+
+var waveMu sync.Mutex
+
+// startWave ждёт, пока загрузится Яндекс Музыка, и включает «Мою волну». Если музыка уже играет — ничего не делает.
+func startWave() {
+	if !waveMu.TryLock() {
+		return
+	}
+	defer waveMu.Unlock()
+	playing := func() bool {
+		st, _ := getMedia()
+		return st.Status == "Playing"
+	}
+	time.Sleep(1500 * time.Millisecond)
+	if playing() {
+		return
+	}
+	clicks := 0
+	for i := 0; i < 20 && clicks < 4; i++ {
+		for _, t := range musicTargets() {
+			res, err := cdpCall(t.WS, "Runtime.evaluate", map[string]any{"expression": waveJS, "returnByValue": true, "userGesture": true})
+			if err != nil {
+				continue
+			}
+			var r struct {
+				Result struct {
+					Value string `json:"value"`
+				} `json:"result"`
+			}
+			json.Unmarshal(res, &r)
+			switch r.Result.Value {
+			case "playing":
+				return
+			case "clicked":
+				clicks++
+				time.Sleep(2500 * time.Millisecond)
+				if playing() {
+					return
+				}
+			}
+		}
+		time.Sleep(time.Second)
+	}
+	// Управлять страницей не вышло (например, приложение Яндекс Музыки без порта отладки) —
+	// пробуем мультимедийную клавишу «плей»
+	if !playing() {
+		tapVK(0xB3, true)
+	}
 }
 
 func focusPID(pid uint32) bool {

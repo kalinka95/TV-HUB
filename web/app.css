@@ -397,3 +397,23 @@ button, input { font: inherit; color: inherit; }
 .app-qr { margin-top: 1rem; }
 .remote-box.in-modal .app-qr .qr { width: 11rem; height: 11rem; }
 .modal-box { max-height: 94vh; overflow: hidden; }
+
+/* Переливающийся фон в цветах обложки */
+:root { --mu1: #fc3f1d; --mu2: #8b5cf6; --mu3: #3b5bdb; }
+.mu-bg { position: absolute; inset: -15%; opacity: 0; transition: opacity 1.2s ease; filter: blur(90px) saturate(1.25); }
+.mu-bg.on { opacity: .9; }
+.mu-bg i { position: absolute; width: 62%; height: 70%; border-radius: 50%; transition: background 2.5s ease;
+  animation: muBlob 22s ease-in-out infinite alternate; }
+.mu-bg i:nth-child(1) { background: var(--mu1); left: 0; top: 0; }
+.mu-bg i:nth-child(2) { background: var(--mu2); right: 0; top: 12%; animation-duration: 27s; animation-delay: -9s; }
+.mu-bg i:nth-child(3) { background: var(--mu3); left: 22%; bottom: 0; animation-duration: 31s; animation-delay: -17s; }
+@keyframes muBlob {
+  0% { transform: translate(0, 0) scale(1); }
+  33% { transform: translate(14%, 10%) scale(1.15); }
+  66% { transform: translate(-10%, 14%) scale(.92); }
+  100% { transform: translate(8%, -12%) scale(1.08); }
+}
+.mu-cover { transition: box-shadow 1.5s ease; }
+#main.music-on .backdrop::after { background: linear-gradient(0deg, #0a0c11b3 0%, transparent 55%), radial-gradient(ellipse at 22% 45%, #0a0c1166, transparent 60%); }
+#main.music-on .mu-bg { inset: -10%; }
+#main.music-on .mu-bg.on { opacity: .75; }

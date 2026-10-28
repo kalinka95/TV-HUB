@@ -608,12 +608,12 @@ async function updateMusic() {
     title.textContent = m.title;
     $('muArtist').textContent = [m.artist, m.album && m.album !== m.title ? m.album : ''].filter(Boolean).join(' — ');
     const cover = $('muCover');
-    if (m.coverVer && cover.dataset.v !== m.coverVer) {
-      cover.dataset.v = m.coverVer;
-      const u = `/api/media/cover?t=${encodeURIComponent(TOKEN)}&v=${m.coverVer}`;
+    const u = coverURL(m);
+    if (u && cover.dataset.u !== u) {
+      cover.dataset.u = u;
       cover.innerHTML = `<img src="${u}" alt="">`;
-      if (S.tab === 'music') { $('backdropImg').style.backgroundImage = `url("${u}")`; document.documentElement.style.setProperty('--hero-color', '#8b5cf655'); }
-    } else if (!m.coverVer && cover.dataset.v) { cover.dataset.v = ''; cover.innerHTML = '<span class="mu-note">♪</span>'; }
+      coverColors(u).then(setMusicColors);
+    } else if (!u && cover.dataset.u) { cover.dataset.u = ''; cover.innerHTML = '<span class="mu-note">♪</span>'; setMusicColors(null); }
   } else {
     $('muKicker').textContent = r.available === false ? 'Музыка' : 'Сейчас ничего не играет';
     title.textContent = r.available === false ? 'Не получается узнать, что играет' : 'Включите музыку';
@@ -622,6 +622,68 @@ async function updateMusic() {
   const ico = document.getElementById('muPlayIco');
   if (ico) ico.setAttribute('d', playing ? 'M8 5v14M16 5v14' : 'M7 5l12 7-12 7z');
   tickMusicProgress();
+}
+
+// Обложка: из Windows (coverVer) или с сайта Яндекс Музыки (через свой сервер — тогда можно взять цвета)
+function coverURL(m) {
+  if (!m) return '';
+  if (m.coverVer) return `/api/media/cover?t=${encodeURIComponent(TOKEN)}&v=${m.coverVer}`;
+  if (m.coverUrl) return '/p?' + new URLSearchParams({ t: TOKEN, u: m.coverUrl.replace(/^\/\//, 'https://') });
+  return '';
+}
+
+// Главные цвета обложки: насыщенные и разные по оттенку
+function coverColors(src) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const c = document.createElement('canvas');
+        c.width = c.height = 32;
+        const g = c.getContext('2d');
+        g.drawImage(img, 0, 0, 32, 32);
+        const d = g.getImageData(0, 0, 32, 32).data;
+        const buckets = new Map();
+        for (let i = 0; i < d.length; i += 4) {
+          const [r, gg, b] = [d[i], d[i + 1], d[i + 2]];
+          const mx = Math.max(r, gg, b), mn = Math.min(r, gg, b);
+          const l = (mx + mn) / 510, s = mx === mn ? 0 : (mx - mn) / (255 - Math.abs(mx + mn - 255));
+          if (l < 0.2 || l > 0.92 || s < 0.15) continue; // слишком тёмные, светлые и серые не берём
+          let h = 0;
+          if (mx !== mn) {
+            if (mx === r) h = ((gg - b) / (mx - mn)) % 6; else if (mx === gg) h = (b - r) / (mx - mn) + 2; else h = (r - gg) / (mx - mn) + 4;
+            h = (h * 60 + 360) % 360;
+          }
+          const key = Math.round(h / 30) % 12;
+          const e = buckets.get(key) || { n: 0, r: 0, g: 0, b: 0, w: 0 };
+          const w = 0.3 + s * 2;
+          e.n++; e.w += w; e.r += r * w; e.g += gg * w; e.b += b * w;
+          buckets.set(key, e);
+        }
+        const top = [...buckets.values()].sort((a, b) => b.w - a.w).slice(0, 3)
+          .map((e) => `rgb(${Math.round(e.r / e.w)}, ${Math.round(e.g / e.w)}, ${Math.round(e.b / e.w)})`);
+        while (top.length && top.length < 3) top.push(top[top.length - 1]);
+        resolve(top.length ? top : null);
+      } catch (e) { resolve(null); }
+    };
+    img.onerror = () => resolve(null);
+    img.src = src;
+  });
+}
+
+function setMusicColors(cols) {
+  const root = document.documentElement.style;
+  const def = ['#fc3f1d', '#8b5cf6', '#3b5bdb'];
+  const c = cols || def;
+  root.setProperty('--mu1', c[0]); root.setProperty('--mu2', c[1]); root.setProperty('--mu3', c[2]);
+  $('muCover').style.boxShadow = cols ? `0 2rem 6rem ${c[0].replace('rgb', 'rgba').replace(')', ', .45)')}` : '';
+}
+
+// Переливающийся фон в цветах обложки — только на вкладке «Музыка»
+function musicBackdrop(on) {
+  $('muBg').classList.toggle('on', on);
+  $('main').classList.toggle('music-on', on);
+  if (on) { $('backdropImg').style.backgroundImage = ''; $('backdropImg').textContent = ''; }
 }
 
 function tickMusicProgress() {

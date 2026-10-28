@@ -117,10 +117,12 @@ type mediaState struct {
 	Pos      float64 `json:"pos"`
 	Dur      float64 `json:"dur"`
 	CoverVer string  `json:"coverVer,omitempty"`
+	CoverURL string  `json:"coverUrl,omitempty"`
 	At       int64   `json:"at"`
 }
 
-var devMedia = mediaState{OK: true, Title: "Звезда по имени Солнце", Artist: "Кино", Album: "Звезда по имени Солнце", Status: "Playing", App: "Yandex.Music", Pos: 42, Dur: 225}
+var devMedia = mediaState{OK: true, Title: "Звезда по имени Солнце", Artist: "Кино", Album: "Звезда по имени Солнце", Status: "Playing", App: "Yandex.Music", Pos: 42, Dur: 225,
+	CoverURL: os.Getenv("TVHUB_DEV_COVER")}
 var devMediaStart = time.Now()
 
 func getMedia() (mediaState, bool) {

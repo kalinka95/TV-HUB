@@ -37,7 +37,8 @@ $null = [Windows.Storage.Streams.IRandomAccessStreamWithContentType, Windows.Sto
 $mgr = Await ([Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager]::RequestAsync()) ([Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager])
 if (-not $mgr) { [Console]::Out.WriteLine('{"ok":false}'); exit }
 $lastKey = ''
-while ($true) {
+$cmdFile = $env:TVHUB_MEDIA_CMD
+function Emit {
   $o = @{ ok = $true }
   $s = $mgr.GetCurrentSession()
   if ($s) {
@@ -49,8 +50,8 @@ while ($true) {
     $o.app = [string]$s.SourceAppUserModelId
     $o.pos = $tl.Position.TotalSeconds; $o.dur = $tl.EndTime.TotalSeconds
     $key = "$($p.Title)|$($p.Artist)"
-    if ($key -ne $lastKey) {
-      $lastKey = $key
+    if ($key -ne $script:lastKey) {
+      $script:lastKey = $key
       $o.cover = ''
       if ($p.Thumbnail) {
         $rs = Await ($p.Thumbnail.OpenReadAsync()) ([Windows.Storage.Streams.IRandomAccessStreamWithContentType])
@@ -66,7 +67,27 @@ while ($true) {
   }
   [Console]::Out.WriteLine(($o | ConvertTo-Json -Compress))
   [Console]::Out.Flush()
-  Start-Sleep -Milliseconds 1500
+}
+$tick = 99
+while ($true) {
+  # Команды от TVHub (пауза, следующий, предыдущий) приходят через файл
+  if ($cmdFile -and (Test-Path $cmdFile)) {
+    $c = ''
+    try { $c = ([IO.File]::ReadAllText($cmdFile)).Trim(); Remove-Item $cmdFile -Force } catch {}
+    $s = $mgr.GetCurrentSession()
+    if ($s) {
+      switch ($c) {
+        'playpause' { $null = Await ($s.TryTogglePlayPauseAsync()) ([bool]) }
+        'next' { $null = Await ($s.TrySkipNextAsync()) ([bool]) }
+        'prev' { $null = Await ($s.TrySkipPreviousAsync()) ([bool]) }
+      }
+    }
+    Start-Sleep -Milliseconds 300
+    $tick = 99
+  }
+  if ($tick -ge 6) { Emit; $tick = 0 }
+  $tick++
+  Start-Sleep -Milliseconds 250
 }
 `
 
@@ -80,6 +101,7 @@ type mediaState struct {
 	Pos      float64 `json:"pos"`
 	Dur      float64 `json:"dur"`
 	CoverVer string  `json:"coverVer,omitempty"`
+	CoverURL string  `json:"coverUrl,omitempty"` // обложка по ссылке (с сайта Яндекс Музыки)
 	At       int64   `json:"at"`
 }
 
@@ -107,6 +129,7 @@ func ensureMediaMonitor() {
 	}
 	cmd := exec.Command(ps, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", base64.StdEncoding.EncodeToString(b))
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: createNoWindow}
+	cmd.Env = append(os.Environ(), "TVHUB_MEDIA_CMD="+mediaCmdFile())
 	out, err := cmd.StdoutPipe()
 	if err != nil {
 		mediaFails++
@@ -164,8 +187,20 @@ func ensureMediaMonitor() {
 func getMedia() (mediaState, bool) {
 	ensureMediaMonitor()
 	mediaMu.Lock()
-	defer mediaMu.Unlock()
-	return media, mediaFails <= 5
+	st, ok := media, mediaFails <= 5
+	mediaMu.Unlock()
+	// Windows не сообщает, что играет, или не отдаёт обложку — спросим сайт Яндекс Музыки
+	if st.Title == "" || (st.CoverVer == "" && strings.Contains(strings.ToLower(st.App), "edge")) {
+		if w, found := webMusicInfo(); found && (st.Title == "" || strings.EqualFold(w.Title, st.Title)) {
+			if st.Title != "" {
+				st.CoverURL = w.CoverURL
+			} else {
+				st = w
+			}
+			ok = true
+		}
+	}
+	return st, ok
 }
 
 func mediaCoverBytes() []byte {
@@ -174,14 +209,64 @@ func mediaCoverBytes() []byte {
 	return mediaCover
 }
 
+func mediaCmdFile() string { return filepath.Join(dataDir, "media-cmd.txt") }
+
+// mediaAction: пауза и треки — через системное управление медиа Windows (как кнопки
+// во всплывающем окне громкости), громкость — клавишами громкости.
 func mediaAction(a string) error {
-	m := map[string]uint16{"playpause": 0xB3, "next": 0xB0, "prev": 0xB1, "volup": 0xAF, "voldown": 0xAE, "mute": 0xAD}
-	vk, ok := m[a]
-	if !ok {
-		return errors.New("неизвестная команда")
+	switch a {
+	case "playpause", "next", "prev":
+		ensureMediaMonitor()
+		mediaMu.Lock()
+		ok := mediaCmd != nil
+		mediaMu.Unlock()
+		if ok && os.WriteFile(mediaCmdFile(), []byte(a), 0o644) == nil {
+			return nil
+		}
+		// Запасной путь: мультимедийные клавиши
+		tapVK(map[string]uint16{"playpause": 0xB3, "next": 0xB0, "prev": 0xB1}[a], true)
+		return nil
+	case "volup", "voldown", "mute":
+		tapVK(map[string]uint16{"volup": 0xAF, "voldown": 0xAE, "mute": 0xAD}[a], true)
+		return nil
 	}
-	tapVK(vk, true)
-	return nil
+	return errors.New("неизвестная команда")
+}
+
+// webMusicInfo — что играет на сайте Яндекс Музыки в окне TVHub (если Windows не сообщает).
+func webMusicInfo() (mediaState, bool) {
+	list, _ := cdpTargets(profileDir("browser-music"))
+	for _, t := range list {
+		if t.Type != "page" || !strings.Contains(t.URL, "music.yandex") || t.WS == "" {
+			continue
+		}
+		res, err := cdpCall(t.WS, "Runtime.evaluate", map[string]any{"returnByValue": true, "expression": `(() => {
+			const m = navigator.mediaSession && navigator.mediaSession.metadata;
+			if (!m) return null;
+			const art = (m.artwork || []).slice().sort((a, b) => parseInt(b.sizes) - parseInt(a.sizes))[0];
+			const a = document.querySelector('audio');
+			return { title: m.title, artist: m.artist, album: m.album, cover: art ? art.src : '',
+				status: navigator.mediaSession.playbackState === 'playing' ? 'Playing' : 'Paused',
+				pos: a ? a.currentTime : 0, dur: a && isFinite(a.duration) ? a.duration : 0 };
+		})()`})
+		if err != nil {
+			continue
+		}
+		var r struct {
+			Result struct {
+				Value *struct {
+					Title, Artist, Album, Cover, Status string
+					Pos, Dur                            float64
+				} `json:"value"`
+			} `json:"result"`
+		}
+		if json.Unmarshal(res, &r) == nil && r.Result.Value != nil && r.Result.Value.Title != "" {
+			v := r.Result.Value
+			return mediaState{OK: true, Title: v.Title, Artist: v.Artist, Album: v.Album, Status: v.Status,
+				App: "Yandex.Music.Web", Pos: v.Pos, Dur: v.Dur, CoverURL: v.Cover, At: time.Now().Unix()}, true
+		}
+	}
+	return mediaState{}, false
 }
 
 // ---------- Яндекс Музыка ----------
@@ -213,43 +298,19 @@ var (
 	musicCmd *exec.Cmd
 )
 
-// launchMusic открывает Яндекс Музыку. Её не закрывает кнопка «Домой»: музыка играет дальше.
+// launchMusic открывает Яндекс Музыку: приложение, если установлено, иначе сайт.
+// Кнопка «Домой» музыку не останавливает.
 func launchMusic(a App) error {
 	if exe := findYandexMusic(); exe != "" {
+		for _, p := range allProcs() { // уже запущено — показываем окно
+			if strings.EqualFold(p.path, exe) && focusPID(p.pid) {
+				return nil
+			}
+		}
 		return windows.ShellExecute(0, windows.StringToUTF16Ptr("open"), windows.StringToUTF16Ptr(exe), nil,
 			windows.StringToUTF16Ptr(filepath.Dir(exe)), 1)
 	}
-	musicMu.Lock()
-	running := musicCmd != nil && musicCmd.ProcessState == nil
-	var pid uint32
-	if running {
-		pid = uint32(musicCmd.Process.Pid)
-	}
-	musicMu.Unlock()
-	if running && focusPID(pid) {
-		return nil
-	}
-	browser := findBrowser()
-	if browser == "" {
-		return windows.ShellExecute(0, nil, windows.StringToUTF16Ptr(a.Target), nil, nil, 1)
-	}
-	c := exec.Command(browser, "--user-data-dir="+filepath.Join(dataDir, "browser-music"), "--no-first-run",
-		"--no-default-browser-check", "--start-fullscreen", "--autoplay-policy=no-user-gesture-required", "--app="+a.Target)
-	if err := c.Start(); err != nil {
-		return err
-	}
-	musicMu.Lock()
-	musicCmd = c
-	musicMu.Unlock()
-	go func() {
-		c.Wait()
-		musicMu.Lock()
-		if musicCmd == c {
-			musicCmd = nil
-		}
-		musicMu.Unlock()
-	}()
-	return nil
+	return openWebApp(a)
 }
 
 func focusPID(pid uint32) bool {

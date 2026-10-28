@@ -207,7 +207,7 @@ function setHero(info) {
   $('heroSub').textContent = info.sub || '';
   document.documentElement.style.setProperty('--hero-color', info.color || '#3b5bdb66');
   const img = $('backdropImg');
-  const showArt = S.tab === 'home' || S.tab === 'music';
+  const showArt = S.tab === 'home';
   img.classList.remove('letter');
   img.style.backgroundImage = '';
   img.textContent = '';
@@ -301,7 +301,8 @@ function switchTab(name) {
   ['home', 'tv', 'apps', 'music', 'settings'].forEach((p) => $('panel-' + p).classList.toggle('hidden', p !== name));
   renderPanel(name);
   const titles = { home: null, tv: 'Телеканалы', apps: 'Приложения', music: 'Музыка', settings: 'Настройки' };
-  if (titles[name]) setHero({ title: titles[name], color: '#3b5bdb44' });
+  if (titles[name]) setHero({ title: titles[name], color: name === 'music' ? 'transparent' : '#3b5bdb44' });
+  musicBackdrop(name === 'music');
 }
 
 function renderPanel(name) {

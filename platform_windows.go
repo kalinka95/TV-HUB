@@ -137,11 +137,6 @@ func bringToFront() {
 
 // ---------- Запуск приложений ----------
 
-var (
-	webMu  sync.Mutex
-	webCmd *exec.Cmd
-)
-
 func hiddenCmd(name string, args ...string) *exec.Cmd {
 	c := exec.Command(name, args...)
 	c.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: createNoWindow}
@@ -167,45 +162,15 @@ func findBrowser() string {
 	return ""
 }
 
-// closeWebApp закрывает окно онлайн-сервиса, открытое из оболочки.
-func closeWebApp() {
-	webMu.Lock()
-	defer webMu.Unlock()
-	if webCmd != nil && webCmd.Process != nil {
-		hiddenCmd("taskkill", "/PID", fmt.Sprint(webCmd.Process.Pid), "/T", "/F").Run()
-		webCmd = nil
-	}
-}
+// closeWebApp закрывает окна онлайн-сервисов, открытые из TVHub (при выходе и перезапуске).
+func closeWebApp() { closeAllWebApps() }
 
 func launchApp(a App) error {
 	switch a.Type {
 	case "music":
 		return launchMusic(a)
 	case "web":
-		closeWebApp()
-		browser := findBrowser()
-		if browser == "" {
-			return windows.ShellExecute(0, nil, windows.StringToUTF16Ptr(a.Target), nil, nil, 1)
-		}
-		// Отдельный профиль: входы в аккаунты сохраняются, а окно можно закрыть кнопкой «Домой».
-		args := []string{
-			"--user-data-dir=" + filepath.Join(dataDir, "browser"),
-			"--no-first-run", "--no-default-browser-check",
-			"--start-fullscreen", "--autoplay-policy=no-user-gesture-required",
-			"--app=" + a.Target,
-		}
-		if a.UserAgent != "" {
-			args = append(args, "--user-agent="+a.UserAgent)
-		}
-		c := exec.Command(browser, args...)
-		if err := c.Start(); err != nil {
-			return err
-		}
-		webMu.Lock()
-		webCmd = c
-		webMu.Unlock()
-		go c.Wait()
-		return nil
+		return openWebApp(a)
 	case "exe":
 		if a.Target == "" {
 			return errors.New("не указан путь к программе")
@@ -237,7 +202,6 @@ func systemAction(action string) error {
 		return hiddenCmd("shutdown", "/r", "/t", "0").Start()
 	case "browser-setup":
 		// Обычное окно Edge с тем же профилем, что и у сервисов: тут ставят блокировщик рекламы
-		closeWebApp()
 		browser := findBrowser()
 		if browser == "" {
 			return errors.New("не найден Microsoft Edge или Google Chrome")
@@ -250,9 +214,6 @@ func systemAction(action string) error {
 		if err := c.Start(); err != nil {
 			return err
 		}
-		webMu.Lock()
-		webCmd = c
-		webMu.Unlock()
 		go c.Wait()
 	case "front":
 		wv.Dispatch(bringToFront)
@@ -327,7 +288,7 @@ func goHome() {
 	if wv == nil {
 		return
 	}
-	closeWebApp()
+	go pauseWebApps() // окна остаются в фоне, видео и звук — на паузе
 	cfgMu.Lock()
 	fs := cfg.Settings.Fullscreen
 	cfgMu.Unlock()

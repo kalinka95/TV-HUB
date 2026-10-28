@@ -347,6 +347,12 @@ func openWebApp(a App) error {
 	if a.UserAgent != "" {
 		args = append(args, "--user-agent="+a.UserAgent)
 	}
+	cfgMu.Lock()
+	dark := cfg.Settings.DarkSites
+	cfgMu.Unlock()
+	if dark {
+		args = append(args, "--enable-features=WebContentsForceDark") // тёмные сайты
+	}
 	c := exec.Command(browser, args...)
 	if err := c.Start(); err != nil {
 		return err
@@ -391,6 +397,16 @@ func closeAllWebApps() {
 	entries, _ := os.ReadDir(dataDir)
 	for _, e := range entries {
 		if e.IsDir() && strings.HasPrefix(e.Name(), "browser") {
+			killProfile(profileDir(e.Name()))
+		}
+	}
+}
+
+// restartWebApps закрывает окна сайтов (кроме музыки), чтобы новые настройки Edge применились.
+func restartWebApps() {
+	entries, _ := os.ReadDir(dataDir)
+	for _, e := range entries {
+		if e.IsDir() && strings.HasPrefix(e.Name(), "browser") && e.Name() != "browser-music" {
 			killProfile(profileDir(e.Name()))
 		}
 	}

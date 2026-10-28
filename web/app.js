@@ -37,6 +37,7 @@ const ICONS = {
   tv: '<svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M8 2l4 4 4-4"/></svg>',
   plus: '<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>',
   phone: '<svg viewBox="0 0 24 24"><rect x="6" y="2" width="12" height="20" rx="2.5"/><path d="M11 18h2"/><circle cx="12" cy="10" r="2.6"/></svg>',
+  theme: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 3.5a8.5 8.5 0 0 0 0 17z" fill="currentColor"/></svg>',
   sun: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4.5"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M4.9 19.1l1.8-1.8M17.3 6.7l1.8-1.8"/></svg>',
   full: '<svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>',
 };
@@ -384,6 +385,7 @@ function renderHome() {
     tile('gear', 'Настройки', () => focusTab('settings'), 'set', { sub: 'Плейлисты, приложения, автозапуск' }),
     tile('phone', 'Пульт на телефоне', showRemoteQR, 'phone', { sub: 'Отсканируйте QR-код камерой телефона — и он станет пультом' }),
     tile('sun', 'Яркость', showBrightness, 'bright', { sub: 'Ярче или темнее экран телевизора. Удобно и с пульта на телефоне' }),
+    tile('theme', 'Тёмная тема', showThemeModal, 'theme', { sub: 'Тёмное оформление Windows, всех программ и сайтов' }),
     tile('remote', 'Проверка пульта', () => show('keytest'), 'kt', { sub: 'Покажет, какие сигналы отправляют кнопки пульта' }),
     tile('refresh', 'Обновить каналы', () => loadChannels(true), 'reload', { sub: 'Заново скачать плейлист' }),
     tile('full', 'Полный экран', () => api.post('/api/system', { action: 'fullscreen' }), 'fs', { sub: 'Включить или выключить (F11)' }),

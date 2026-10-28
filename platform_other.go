@@ -178,3 +178,11 @@ func resetBrightness() {}
 
 func waitUIReady() {}
 func startDimmer() {}
+
+// ---------- Тёмная тема (в режиме разработки — имитация) ----------
+
+var devDark = false
+
+func windowsDark() bool            { return devDark }
+func setWindowsDark(on bool) error { devDark = on; return nil }
+func restartWebApps()              {}

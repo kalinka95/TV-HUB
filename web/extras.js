@@ -780,6 +780,7 @@ function renderExtraSettings(inner) {
   sv.append(sr);
   inner.append(sv);
 
+  themeSection(inner);
   updateSection(inner);
 
   // Режим администратора
@@ -926,6 +927,48 @@ async function showBrightness() {
   setFocus(plus);
 }
 
+// ---------- Тёмная тема ----------
+
+const TH = { windows: false, sites: false };
+
+async function loadTheme() {
+  try { Object.assign(TH, await api.get('/api/theme')); } catch (e) {}
+  return TH;
+}
+
+async function setTheme(part, on) {
+  try {
+    const r = await api.post('/api/theme', { [part]: on });
+    if (!r.ok) { toast(r.error || 'Не получилось', 5000); return; }
+    Object.assign(TH, r);
+    if (part === 'windows') toast(on ? 'Тёмная тема включена для всего компьютера' : 'Светлая тема включена');
+    else toast(on ? 'Сайты будут тёмными. Открытые сайты закрыты — откройте их заново' : 'Сайты снова как обычно. Откройте их заново');
+  } catch (e) { toast('Ошибка: ' + e.message); }
+}
+
+async function showThemeModal() {
+  await loadTheme();
+  const box = el('div', 'theme-modal');
+  const render = () => {
+    box.innerHTML = '';
+    box.append(toggleRow('Тёмная тема Windows и программ', TH.windows, async () => { await setTheme('windows', !TH.windows); render(); focusByKey('th-win', $('modal')); }, 'th-win'));
+    box.append(toggleRow('Тёмные сайты (Кинопоиск, YouTube и другие)', TH.sites, async () => { await setTheme('sites', !TH.sites); render(); focusByKey('th-sites', $('modal')); }, 'th-sites'));
+    box.append(el('div', 'note', 'Тёмная тема Windows перекрашивает Проводник, Параметры, Edge и программы, которые поддерживают тему Windows. «Тёмные сайты» затемняют в Edge даже сайты без своей тёмной темы.'));
+  };
+  render();
+  modal('Тёмная тема', [{ label: 'Готово' }], box);
+  focusByKey('th-win', $('modal'));
+}
+
+function themeSection(inner) {
+  const sec = el('div', 's-section');
+  sec.append(el('h2', '', 'Тёмная тема'));
+  sec.append(el('p', 'note', 'Включает тёмную тему для всего компьютера: Windows, Проводник, Параметры, Edge и программы, которые поддерживают тему Windows.'));
+  sec.append(toggleRow('Тёмная тема Windows и программ', TH.windows, async () => { await setTheme('windows', !TH.windows); keepFocus(renderSettings); }, 'set-darkwin'));
+  sec.append(toggleRow('Тёмные сайты (Edge затемняет сайты без своей тёмной темы)', TH.sites, async () => { await setTheme('sites', !TH.sites); keepFocus(renderSettings); }, 'set-darksites'));
+  inner.append(sec);
+}
+
 // ---------- Запуск ----------
 
 function startExtras() {
@@ -937,6 +980,7 @@ function startExtras() {
   setInterval(loadWeather, 15 * 60000);
   loadNotices();
   loadUpdate();
+  loadTheme();
   setTimeout(showWhatsNew, 1500);
   $('weatherBtn')._onfocus = null;
   if (!cur || !cur.isConnected) setWelcomeHero();

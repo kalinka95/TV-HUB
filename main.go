@@ -25,7 +25,7 @@ import (
 )
 
 // Версию подставляет сборка на GitHub (-ldflags -X main.appVersion=…)
-var appVersion = "1.2.4"
+var appVersion = "1.2.5"
 
 //go:embed web
 var webFS embed.FS
@@ -62,6 +62,7 @@ type Settings struct {
 	City              *City  `json:"city,omitempty"`         // город для погоды
 	AutoUpdateOff     bool   `json:"autoUpdateOff,omitempty"`
 	Brightness        int    `json:"brightness,omitempty"` // 10–100, 0 = 100
+	DarkSites         bool   `json:"darkSites,omitempty"`  // Edge затемняет сайты без своей тёмной темы
 	VPNHidden         bool   `json:"vpnHidden,omitempty"`
 }
 
@@ -530,6 +531,7 @@ func handleSaveConfig(w http.ResponseWriter, r *http.Request) {
 	c.Settings.RunAsAdmin = cfg.Settings.RunAsAdmin
 	c.Reminders = cfg.Reminders
 	c.Settings.Brightness = cfg.Settings.Brightness
+	c.Settings.DarkSites = cfg.Settings.DarkSites
 	prevEPG := cfg.Settings.EPGURL + "|" + cfg.ActivePlaylist
 	cfg = c
 	err := saveConfigLocked()
@@ -646,6 +648,7 @@ func startServer() (string, error) {
 	mux.HandleFunc("POST /api/update", apiAuth(handleUpdateAction))
 	mux.HandleFunc("/api/whatsnew", apiAuth(handleWhatsNew))
 	mux.HandleFunc("/api/brightness", apiAuth(handleBrightness))
+	mux.HandleFunc("/api/theme", apiAuth(handleTheme))
 	mux.HandleFunc("GET /api/notices", apiAuth(handleNotices))
 	mux.HandleFunc("POST /api/notices/read", apiAuth(handleNoticesRead))
 	mux.HandleFunc("POST /api/reminder", apiAuth(handleReminder))

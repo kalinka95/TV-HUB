@@ -458,7 +458,7 @@ async function brightness(delta) {
     $('brVal').textContent = d.level + '%';
     const ds = d.displays || [];
     if (ds.length && ds.every((x) => x.method === 'none')) toast('Этот экран не даёт менять яркость', 4000);
-    else if (!brNoted && ds.some((x) => x.method && x.method.startsWith('gamma'))) {
+    else if (!brNoted && ds.some((x) => x.method === 'gamma' || x.method === 'overlay')) {
       brNoted = true;
       toast(ds.some((x) => x.method === 'ddc') ? 'Яркость меняется' : 'Телевизор не даёт менять подсветку — затемняю картинку', 4000);
     }

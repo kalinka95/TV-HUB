@@ -49,6 +49,8 @@ func handleBrightness(w http.ResponseWriter, r *http.Request) {
 
 // restoreBrightness при запуске возвращает выбранную яркость.
 func restoreBrightness() {
+	waitUIReady()
+	startDimmer()
 	if lv := currentBrightness(); lv < 100 {
 		applyBrightness(lv)
 	}

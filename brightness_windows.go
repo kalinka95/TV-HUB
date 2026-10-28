@@ -1,12 +1,14 @@
 //go:build windows
 
-// Яркость экрана: сначала через DDC/CI (сам монитор или телевизор меняет подсветку),
-// если экран так не умеет — программно, через гамму видеокарты (работает с любым экраном).
+// Яркость экрана: сначала через DDC/CI (сам монитор или телевизор меняет подсветку).
+// Если экран так не умеет — программно: гамма видеокарты (Windows позволяет примерно до 60%)
+// плюс полупрозрачный тёмный слой поверх экрана, сквозь который проходят нажатия.
 package main
 
 import (
 	"log"
 	"sync"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -44,6 +46,7 @@ type displayInfo struct {
 	Method string `json:"method"` // ddc — подсветка экрана, gamma — программное затемнение
 	hmon   uintptr
 	device string
+	rc     rect
 }
 
 var (
@@ -62,7 +65,7 @@ func listDisplays() []displayInfo {
 	for _, h := range brMonitors {
 		mi := monitorInfoEx{CbSize: uint32(unsafe.Sizeof(monitorInfoEx{}))}
 		procGetMonitorInfo.Call(h, uintptr(unsafe.Pointer(&mi)))
-		d := displayInfo{hmon: h, device: windows.UTF16ToString(mi.Device[:]), Name: windows.UTF16ToString(mi.Device[:])}
+		d := displayInfo{hmon: h, device: windows.UTF16ToString(mi.Device[:]), Name: windows.UTF16ToString(mi.Device[:]), rc: mi.Monitor}
 		var n uint32
 		if r, _, _ := procNumPhysical.Call(h, uintptr(unsafe.Pointer(&n))); r != 0 && n > 0 {
 			mons := make([]physicalMonitor, n)
@@ -146,20 +149,132 @@ func applyBrightness(level int) []displayInfo {
 	brMu.Lock()
 	defer brMu.Unlock()
 	ds := listDisplays()
+	active := map[string]bool{}
 	for i := range ds {
 		if ds[i].Method == "ddc" && setDDC(ds[i].hmon, level) {
 			setGamma(ds[i].device, 100) // программное затемнение больше не нужно
+			setOverlay(ds[i].device, ds[i].rc, 0)
+			active[ds[i].device] = true
 			continue
 		}
+		// Гамма даёт часть затемнения, остальное — тёмный слой поверх экрана
+		got := setGamma(ds[i].device, level)
+		if got == 0 {
+			got = 100
+		}
+		rest := level * 100 / got // какая доля яркости ещё нужна, %
+		alpha := 255 * (100 - rest) / 100
 		ds[i].Method = "gamma"
-		if got := setGamma(ds[i].device, level); got == 0 {
-			ds[i].Method = "none"
-			log.Printf("яркость: экран %s не поддерживает изменение", ds[i].Name)
-		} else if got != level {
-			ds[i].Method = "gamma-limited"
+		if alpha > 0 {
+			ds[i].Method = "overlay"
+		}
+		active[ds[i].device] = true
+		setOverlay(ds[i].device, ds[i].rc, alpha)
+	}
+	// Слои на отключённых экранах убираем
+	for dev := range dimWins {
+		if !active[dev] {
+			setOverlay(dev, rect{}, 0)
 		}
 	}
 	return ds
+}
+
+// ---------- Тёмный слой поверх экрана ----------
+
+var (
+	procCreateWindowEx  = user32.NewProc("CreateWindowExW")
+	procRegisterClassEx = user32.NewProc("RegisterClassExW")
+	procDefWindowProc   = user32.NewProc("DefWindowProcW")
+	procDestroyWindow   = user32.NewProc("DestroyWindow")
+	procSetLayeredAttrs = user32.NewProc("SetLayeredWindowAttributes")
+	procGetStockObject  = gdi32.NewProc("GetStockObject")
+	dimWins             = map[string]uintptr{}
+	dimAlpha            = map[string]int{}
+	dimClassOnce        sync.Once
+	dimClassName, _     = windows.UTF16PtrFromString("TVHubDimmer")
+)
+
+type wndClassEx struct {
+	Size       uint32
+	Style      uint32
+	WndProc    uintptr
+	ClsExtra   int32
+	WndExtra   int32
+	Instance   windows.Handle
+	Icon       windows.Handle
+	Cursor     windows.Handle
+	Background windows.Handle
+	MenuName   *uint16
+	ClassName  *uint16
+	IconSm     windows.Handle
+}
+
+// onUI выполняет f в главном потоке окна (там работает цикл сообщений) и ждёт результата.
+func onUI(f func()) {
+	if wv == nil {
+		return
+	}
+	done := make(chan struct{})
+	wv.Dispatch(func() { f(); close(done) })
+	<-done
+}
+
+func setOverlay(device string, r rect, alpha int) {
+	if alpha < 0 {
+		alpha = 0
+	}
+	if alpha > 235 {
+		alpha = 235 // не делаем экран совсем чёрным
+	}
+	onUI(func() {
+		h := dimWins[device]
+		if alpha == 0 {
+			if h != 0 {
+				procDestroyWindow.Call(h)
+				delete(dimWins, device)
+				delete(dimAlpha, device)
+			}
+			return
+		}
+		if h == 0 {
+			dimClassOnce.Do(func() {
+				var inst windows.Handle
+				windows.GetModuleHandleEx(0, nil, &inst)
+				black, _, _ := procGetStockObject.Call(4) // BLACK_BRUSH
+				wc := wndClassEx{WndProc: procDefWindowProc.Addr(), Instance: inst, Background: windows.Handle(black), ClassName: dimClassName}
+				wc.Size = uint32(unsafe.Sizeof(wc))
+				procRegisterClassEx.Call(uintptr(unsafe.Pointer(&wc)))
+			})
+			const exStyle = 0x00080000 | 0x00000020 | 0x00000008 | 0x00000080 | 0x08000000 // layered, transparent, topmost, toolwindow, noactivate
+			h, _, _ = procCreateWindowEx.Call(exStyle, uintptr(unsafe.Pointer(dimClassName)), 0, wsPopup,
+				uintptr(r.Left), uintptr(r.Top), uintptr(r.Right-r.Left), uintptr(r.Bottom-r.Top), 0, 0, 0, 0)
+			if h == 0 {
+				log.Printf("яркость: не удалось создать затемняющий слой")
+				return
+			}
+			dimWins[device] = h
+		}
+		procSetLayeredAttrs.Call(h, 0, uintptr(alpha), 2) // LWA_ALPHA
+		dimAlpha[device] = alpha
+		topmost := ^uintptr(0)                                                                                                              // HWND_TOPMOST
+		procSetWindowPos.Call(h, topmost, uintptr(r.Left), uintptr(r.Top), uintptr(r.Right-r.Left), uintptr(r.Bottom-r.Top), 0x0010|0x0040) // NOACTIVATE|SHOWWINDOW
+	})
+}
+
+// keepDimmerOnTop следит, чтобы слой оставался поверх окон, которые сами встают «поверх всех».
+func keepDimmerOnTop() {
+	for {
+		time.Sleep(3 * time.Second)
+		if wv == nil {
+			continue
+		}
+		wv.Dispatch(func() {
+			for _, h := range dimWins {
+				procSetWindowPos.Call(h, ^uintptr(0), 0, 0, 0, 0, 0x0001|0x0002|0x0010) // NOSIZE|NOMOVE|NOACTIVATE
+			}
+		})
+	}
 }
 
 // resetBrightness возвращает обычную картинку (гамму) при выходе из TVHub.
@@ -169,4 +284,10 @@ func resetBrightness() {
 	for _, d := range listDisplays() {
 		setGamma(d.device, 100)
 	}
+	for dev, h := range dimWins { // вызывается из главного потока после выхода из цикла окна
+		procDestroyWindow.Call(h)
+		delete(dimWins, dev)
+	}
 }
+
+func startDimmer() { go keepDimmerOnTop() }

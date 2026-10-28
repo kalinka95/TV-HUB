@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 	"unsafe"
 
 	webview2 "github.com/jchv/go-webview2"
@@ -450,4 +451,11 @@ func platformPreInit() bool {
 		log.Printf("режим администратора: запуск отменён, работаю с обычными правами")
 	}
 	return false
+}
+
+// waitUIReady ждёт, пока создано окно TVHub (нужно затемняющему слою).
+func waitUIReady() {
+	for i := 0; i < 300 && (wv == nil || hwnd == 0); i++ {
+		time.Sleep(100 * time.Millisecond)
+	}
 }

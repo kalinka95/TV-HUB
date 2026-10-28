@@ -173,3 +173,6 @@ func applyBrightness(level int) []displayInfo {
 	return []displayInfo{{Name: "Телевизор (тест)", Method: "gamma"}}
 }
 func resetBrightness() {}
+
+func waitUIReady() {}
+func startDimmer() {}

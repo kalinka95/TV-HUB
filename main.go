@@ -25,7 +25,7 @@ import (
 )
 
 // Версию подставляет сборка на GitHub (-ldflags -X main.appVersion=…)
-var appVersion = "1.3.1"
+var appVersion = "1.3.2"
 
 //go:embed web
 var webFS embed.FS
@@ -663,11 +663,14 @@ func startServer() (string, error) {
 	mux.HandleFunc("POST /api/media", apiAuth(func(w http.ResponseWriter, r *http.Request) {
 		var req struct{ Action string }
 		json.NewDecoder(io.LimitReader(r.Body, 1024)).Decode(&req)
-		if err := mediaAction(req.Action); err != nil {
+		info := ""
+		if st, _ := getMedia(); req.Action == "playpause" && st.Title == "" {
+			info = startMusic()
+		} else if err := mediaAction(req.Action); err != nil {
 			writeJSON(w, map[string]any{"ok": false, "error": err.Error()})
 			return
 		}
-		writeJSON(w, map[string]any{"ok": true})
+		writeJSON(w, map[string]any{"ok": true, "info": info})
 	}))
 	mux.HandleFunc("GET /api/media/cover", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Query().Get("t") != token {

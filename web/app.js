@@ -26,7 +26,7 @@ const S = {
 };
 
 const ICONS = {
-  gear: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/></svg>',
+  gear: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>',
   remote: '<svg viewBox="0 0 24 24"><rect x="7" y="2" width="10" height="20" rx="3"/><circle cx="12" cy="8" r="2"/><path d="M10 14h4M10 17.5h4"/></svg>',
   refresh: '<svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg>',
   minimize: '<svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M9 11h6"/></svg>',
@@ -155,18 +155,47 @@ function move(dir) {
     if (first) { setFocus(first); return true; }
   }
   const r = cur.getBoundingClientRect();
-  let best = null, bs = Infinity;
-  for (const e of list) {
-    if (e === cur) continue;
-    const c = e.getBoundingClientRect();
-    let primary, orth;
-    if (dir === 'right') { if (c.left < r.right - 4) continue; primary = c.left - r.right; orth = overlap(r.top, r.bottom, c.top, c.bottom); }
-    else if (dir === 'left') { if (c.right > r.left + 4) continue; primary = r.left - c.right; orth = overlap(r.top, r.bottom, c.top, c.bottom); }
-    else if (dir === 'down') { if (c.top < r.bottom - 4) continue; primary = c.top - r.bottom; orth = overlap(r.left, r.right, c.left, c.right); }
-    else { if (c.bottom > r.top + 4) continue; primary = r.top - c.bottom; orth = overlap(r.left, r.right, c.left, c.right); }
-    const s = Math.max(0, primary) + orth * 3;
-    if (s < bs) { bs = s; best = e; }
-  }
+  // Сначала ищем в том же прокручиваемом списке (даже за краем экрана), и только потом — снаружи
+  const SCROLLERS = '.settings-body, .rows, .ch-grid-wrap, .groups, .zap-list, .guide-list, .nt-list, .apps-grid';
+  const box = cur.closest(SCROLLERS);
+  const pick = (cands) => {
+    if (dir === 'up' || dir === 'down') {
+      // Вверх/вниз: сначала ближайшая строка, в ней — кнопка ближе всего по горизонтали
+      const rows = [];
+      for (const e of cands) {
+        if (e === cur) continue;
+        const c = e.getBoundingClientRect();
+        if (dir === 'down' ? c.top < r.bottom - 4 : c.bottom > r.top + 4) continue;
+        rows.push({ e, c, d: dir === 'down' ? c.top - r.bottom : r.top - c.bottom });
+      }
+      if (!rows.length) return null;
+      const near = Math.max(0, Math.min(...rows.map((x) => x.d)));
+      const cx = (r.left + r.right) / 2;
+      let b = null, bs = Infinity;
+      for (const x of rows) {
+        if (Math.max(0, x.d) > near + 24) continue;
+        const s = Math.abs((x.c.left + x.c.right) / 2 - cx) + overlap(r.left, r.right, x.c.left, x.c.right) * 2;
+        if (s < bs) { bs = s; b = x.e; }
+      }
+      return b;
+    }
+    let b = null, bs = Infinity;
+    for (const e of cands) {
+      if (e === cur) continue;
+      const c = e.getBoundingClientRect();
+      let primary, orth;
+      if (dir === 'right') { if (c.left < r.right - 4) continue; primary = c.left - r.right; orth = overlap(r.top, r.bottom, c.top, c.bottom); }
+      else if (dir === 'left') { if (c.right > r.left + 4) continue; primary = r.left - c.right; orth = overlap(r.top, r.bottom, c.top, c.bottom); }
+      else if (dir === 'down') { if (c.top < r.bottom - 4) continue; primary = c.top - r.bottom; orth = overlap(r.left, r.right, c.left, c.right); }
+      else { if (c.bottom > r.top + 4) continue; primary = r.top - c.bottom; orth = overlap(r.left, r.right, c.left, c.right); }
+      const s = Math.max(0, primary) + orth * 3;
+      if (s < bs) { bs = s; b = e; }
+    }
+    return b;
+  };
+  let best = null;
+  if (box && (dir === 'up' || dir === 'down')) best = pick(list.filter((e) => box.contains(e)));
+  if (!best) best = pick(list);
   if (!best) return false;
   // При входе в меню вкладок/категорий фокус встаёт на выбранный пункт
   const sticky = best.closest('[data-sticky]');
@@ -905,6 +934,7 @@ function listenEvents() {
     else if (ev.type === 'brightness') onBrightnessEvent(ev);
     else if (ev.type === 'home') window.tvHome();
     else if (ev.type === 'music') window.tvMusic();
+    else if (ev.type === 'screen') window.tvShow(ev.name);
     else if (ev.type === 'appShown') hideLaunch(500);
     else if (ev.type === 'key') {
       const key = KEYS[ev.key] || ev.key;
@@ -996,15 +1026,18 @@ function hideLaunch(delay) {
   }, delay);
 }
 
-// Вызывается с пульта: показать экран «Музыка»
-window.tvMusic = function () {
+// Вызывается с пульта: показать вкладку («Музыка», «Настройки») на экране
+window.tvShow = function (name) {
   hideSaver();
+  hideLaunch(0);
   if (!$('modal').classList.contains('hidden')) closeModal();
   if (S.screen === 'player') exitPlayer();
   if (S.screen !== 'main') show('main');
-  switchTab('music');
-  focusByKey('mu:play', $('main')) || focusFirst($('panel-music'));
+  switchTab(name);
+  if (name === 'music') focusByKey('mu:play', $('main')) || focusFirst($('panel-music'));
+  else focusFirst($('panel-' + name));
 };
+window.tvMusic = () => window.tvShow('music');
 
 // Вызывается из Go, когда нажата кнопка «Домой» на пульте
 window.tvHome = function () {

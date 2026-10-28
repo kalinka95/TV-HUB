@@ -191,4 +191,8 @@ var devDark = false
 func windowsDark() bool            { return devDark }
 func setWindowsDark(on bool) error { devDark = on; return nil }
 func restartWebApps()              {}
-func showMusicScreen()             { pushEvent(map[string]string{"type": "music"}) }
+func showScreen(name string)       { pushEvent(map[string]string{"type": "screen", "name": name}) }
+func startMusic() string {
+	log.Printf("start music")
+	return "Включил «Мою волну» (тест)"
+}

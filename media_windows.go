@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"os"
 	"os/exec"
@@ -318,6 +319,10 @@ var (
 // Кнопка «Домой» музыку не останавливает.
 func launchMusic(a App) error {
 	defer func() { go startWave() }() // сразу включаем «Мою волну», если ничего не играет
+	return launchMusicNoWave(a)
+}
+
+func launchMusicNoWave(a App) error {
 	if exe := findYandexMusic(); exe != "" {
 		if p := ymDesktopProc(exe); p != 0 && focusPID(p) {
 			return nil
@@ -341,16 +346,24 @@ func ymDesktopProc(exe string) uint32 {
 }
 
 // startMusic — «плей», когда ничего не играет: открыть Яндекс Музыку (если закрыта) и включить волну.
-func startMusic() {
-	running := len(musicTargets()) > 0
-	if exe := findYandexMusic(); exe != "" && ymDesktopProc(exe) != 0 {
-		running = true
+// Возвращает понятное описание того, что получилось.
+func startMusic() string {
+	if exe := findYandexMusic(); exe != "" {
+		if p := ymDesktopProc(exe); p != 0 {
+			if _, port := cdpTargetsPort(ymDesktopPort); port == "" || len(musicTargets()) == 0 {
+				// Приложение запущено без возможности управления — перезапускаем его (музыка всё равно не играет)
+				hiddenCmd("taskkill", "/PID", fmt.Sprint(p), "/T", "/F").Run()
+				time.Sleep(1200 * time.Millisecond)
+				launchMusicNoWave(yandexMusicApp)
+				return startWave()
+			}
+			return startWave()
+		}
 	}
-	if !running {
-		launchMusic(yandexMusicApp) // сама запустит волну
-		return
+	if len(musicTargets()) == 0 {
+		launchMusicNoWave(yandexMusicApp)
 	}
-	startWave()
+	return startWave()
 }
 
 // musicTargets — страницы Яндекс Музыки, которыми можно управлять: сайт в окне TVHub и приложение.
@@ -378,30 +391,32 @@ const waveJS = `(() => {
     if (blk) t = [...blk.querySelectorAll('button,[role=button]')].find(vis) || blk;
   }
   if (!t) t = btns.find((b) => /(воспроизвести|воспроизведение|play_button|playbutton|play button|^\s*play\s*$|слушать)/.test(label(b)) && !/(пауз|pause)/.test(label(b)));
-  if (!t) return 'none';
+  if (!t) return 'none|' + btns.slice(0, 14).map((b) => label(b).replace(/\s+/g, ' ').trim().slice(0, 30)).filter(Boolean).join(' / ');
   t.click();
   return 'clicked';
 })()`
 
 var waveMu sync.Mutex
 
-// startWave ждёт, пока загрузится Яндекс Музыка, и включает «Мою волну». Если музыка уже играет — ничего не делает.
-func startWave() {
+// startWave ждёт, пока загрузится Яндекс Музыка, и включает «Мою волну».
+// Если музыка уже играет — ничего не делает. Возвращает описание результата.
+func startWave() string {
 	if !waveMu.TryLock() {
-		return
+		return "Уже включаю музыку…"
 	}
 	defer waveMu.Unlock()
 	playing := func() bool {
 		st, _ := getMedia()
 		return st.Status == "Playing"
 	}
-	time.Sleep(1500 * time.Millisecond)
+	time.Sleep(1200 * time.Millisecond)
 	if playing() {
-		return
+		return "Музыка играет"
 	}
-	clicks := 0
+	clicks, sawPage, lastLabels := 0, false, ""
 	for i := 0; i < 20 && clicks < 4; i++ {
 		for _, t := range musicTargets() {
+			sawPage = true
 			res, err := cdpCall(t.WS, "Runtime.evaluate", map[string]any{"expression": waveJS, "returnByValue": true, "userGesture": true})
 			if err != nil {
 				continue
@@ -412,23 +427,37 @@ func startWave() {
 				} `json:"result"`
 			}
 			json.Unmarshal(res, &r)
-			switch r.Result.Value {
-			case "playing":
-				return
-			case "clicked":
+			v := r.Result.Value
+			switch {
+			case v == "playing":
+				return "Музыка играет"
+			case v == "clicked":
 				clicks++
 				time.Sleep(2500 * time.Millisecond)
 				if playing() {
-					return
+					return "Включил «Мою волну»"
 				}
+			case strings.HasPrefix(v, "none|"):
+				lastLabels = strings.TrimPrefix(v, "none|")
 			}
 		}
 		time.Sleep(time.Second)
 	}
-	// Управлять страницей не вышло (например, приложение Яндекс Музыки без порта отладки) —
-	// пробуем мультимедийную клавишу «плей»
-	if !playing() {
-		tapVK(0xB3, true)
+	tapVK(0xB3, true) // последняя попытка — клавиша «плей»
+	time.Sleep(1500 * time.Millisecond)
+	if playing() {
+		return "Музыка играет"
+	}
+	switch {
+	case !sawPage:
+		log.Printf("музыка: нет страницы Яндекс Музыки для управления")
+		return "Не получилось управлять Яндекс Музыкой. Откройте её кнопкой «Открыть Яндекс Музыку» в TVHub и нажмите «плей» ещё раз"
+	case clicks > 0:
+		log.Printf("музыка: нажал «Моя волна», но музыка не заиграла")
+		return "Нажал «Моя волна», но музыка не заиграла. Возможно, нужно войти в аккаунт Яндекса"
+	default:
+		log.Printf("музыка: не нашёл кнопку «Моя волна»; кнопки на странице: %s", lastLabels)
+		return "Не нашёл кнопку «Моя волна» на странице. Кнопки: " + lastLabels
 	}
 }
 

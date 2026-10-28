@@ -97,7 +97,8 @@ header { display: flex; align-items: center; gap: 10px; height: 44px; flex: none
 .note { color: var(--muted); font-size: 13px; line-height: 1.5; margin: 0; }
 
 /* Меню приложения для Android */
-.app-menu { width: 40px; height: 40px; border-radius: 12px; background: var(--surface); font-size: 22px; font-weight: 800; margin-left: 8px; }
+.app-menu { width: 40px; height: 40px; border-radius: 12px; background: var(--surface); font-size: 22px; font-weight: 800; margin-left: 8px; display: grid; place-items: center; flex: none; }
+.app-menu svg { width: 22px; height: 22px; stroke: var(--text); fill: none; stroke-width: 1.9; stroke-linecap: round; }
 .sheet { position: fixed; inset: 0; background: #000a; z-index: 8; display: flex; align-items: flex-end; }
 .sheet-box { width: 100%; background: var(--surface); border-radius: 20px 20px 0 0; padding: 18px 16px max(18px, env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: 10px; }
 .sheet-title { font-weight: 700; font-size: 17px; margin-bottom: 4px; }
@@ -162,6 +163,7 @@ header { display: flex; align-items: center; gap: 10px; height: 44px; flex: none
   <div class="logo">TV</div>
   <div class="title">Пульт TVHub</div>
   <div class="status" id="status"><span class="dot"></span><span id="statusText">Подключение…</span></div>
+  <button class="app-menu" id="tvSettings" aria-label="Настройки на телевизоре"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
   <button class="app-menu hidden" id="appMenu" aria-label="Настройки приложения">⋯</button>
 </header>
 <div class="sheet hidden" id="sheet">
@@ -479,10 +481,12 @@ function tickMusic() {
 document.querySelectorAll('[data-mu]').forEach((b) => b.addEventListener('click', async () => {
   buzz();
   const action = b.dataset.mu;
+  if (action === 'playpause' && !(muSt && muSt.title)) toast('Включаю «Мою волну»…', 15000);
   try {
     const r = await fetch('/r/api/media', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Remote': KEY }, body: JSON.stringify({ action }) });
     const d = await r.json();
     if (!d.ok) toast(d.error || 'Не получилось');
+    else if (d.info) toast(d.info, 7000);
     else if (action === 'show') toast('Музыка открыта на экране');
     else if (action === 'open') toast('Открываю Яндекс Музыку…');
   } catch (e) { toast('Нет связи с компьютером'); }
@@ -596,6 +600,15 @@ async function brightness(delta) {
 $('brDown').addEventListener('click', () => brightness(-10));
 $('brUp').addEventListener('click', () => brightness(10));
 fetch('/r/api/brightness', { headers: { 'X-Remote': KEY } }).then((r) => r.json()).then((d) => { $('brVal').textContent = d.level + '%'; }).catch(() => {});
+
+// ----- Настройки на телевизоре -----
+$('tvSettings').addEventListener('click', async () => {
+  buzz();
+  try {
+    await fetch('/r/api/screen', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Remote': KEY }, body: JSON.stringify({ name: 'settings' }) });
+    toast('Настройки открыты на экране');
+  } catch (e) { toast('Нет связи с компьютером'); }
+});
 
 // ----- Приложение для Android -----
 if (window.TVHubApp) {

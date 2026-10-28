@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -421,13 +422,14 @@ func waitUIReady() {
 	}
 }
 
-// showMusicScreen выводит TVHub на экран и открывает вкладку «Музыка».
-func showMusicScreen() {
+// showScreen выводит TVHub на экран и открывает нужную вкладку («Музыка», «Настройки»).
+func showScreen(name string) {
 	if wv == nil {
 		return
 	}
+	go pauseWebApps()
 	wv.Dispatch(func() {
 		bringToFront()
-		wv.Eval("window.tvMusic && window.tvMusic()")
+		wv.Eval("window.tvShow && window.tvShow(" + strconv.Quote(name) + ")")
 	})
 }

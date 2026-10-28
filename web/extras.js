@@ -590,7 +590,10 @@ function renderMusic() {
 }
 
 async function mediaCmd(action) {
-  try { await api.post('/api/media', { action }); } catch (e) { toast('Ошибка: ' + e.message); }
+  try {
+    const r = await api.post('/api/media', { action });
+    if (r.info) toast(r.info, 6000);
+  } catch (e) { toast('Ошибка: ' + e.message); }
   setTimeout(updateMusic, 400);
 }
 

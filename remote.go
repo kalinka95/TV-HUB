@@ -308,11 +308,18 @@ func startRemoteServer() {
 		var req struct{ Action string }
 		json.NewDecoder(io.LimitReader(r.Body, 1024)).Decode(&req)
 		var err error
+		info := ""
 		switch req.Action {
 		case "show":
-			showMusicScreen()
+			showScreen("music")
 		case "open":
 			err = launchApp(yandexMusicApp)
+		case "playpause":
+			if st, _ := getMedia(); st.Title == "" {
+				info = startMusic() // ничего не играет — включаем «Мою волну» и сообщаем, что вышло
+			} else {
+				err = mediaAction(req.Action)
+			}
 		default:
 			err = mediaAction(req.Action)
 		}
@@ -320,7 +327,7 @@ func startRemoteServer() {
 			writeJSON(w, map[string]any{"ok": false, "error": err.Error()})
 			return
 		}
-		writeJSON(w, map[string]any{"ok": true})
+		writeJSON(w, map[string]any{"ok": true, "info": info})
 	}))
 	// Картинку телефон грузит тегом <img>, поэтому ключ — в адресе
 	mux.HandleFunc("GET /r/api/media/cover", func(w http.ResponseWriter, r *http.Request) {
@@ -340,6 +347,20 @@ func startRemoteServer() {
 		w.Header().Set("Cache-Control", "max-age=3600")
 		w.Write(b)
 	})
+	mux.HandleFunc("POST /r/api/screen", remoteAuth(func(w http.ResponseWriter, r *http.Request) {
+		var req struct{ Name string }
+		json.NewDecoder(io.LimitReader(r.Body, 1024)).Decode(&req)
+		if req.Name != "settings" && req.Name != "music" && req.Name != "home" {
+			http.Error(w, "unknown screen", 400)
+			return
+		}
+		if req.Name == "home" {
+			goHome()
+		} else {
+			showScreen(req.Name)
+		}
+		writeJSON(w, map[string]any{"ok": true})
+	}))
 	mux.HandleFunc("GET /r/api/windows", remoteAuth(func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]any{"windows": listWindows()})
 	}))

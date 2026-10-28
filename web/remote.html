@@ -1,0 +1,453 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0a0c11">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<link rel="icon" href="/r/icon.png">
+<link rel="apple-touch-icon" href="/r/icon.png">
+<title>Пульт TVHub</title>
+<style>
+:root {
+  --bg: #0a0c11; --surface: #161a23; --surface-2: #222838; --line: #2c3446;
+  --text: #f3f5f9; --muted: #98a2b5; --accent: #4f8cff; --accent-2: #8b5cf6; --danger: #ff5a5f; --ok: #2fbf71;
+}
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); }
+body {
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  user-select: none; -webkit-user-select: none; touch-action: manipulation; overscroll-behavior: none;
+  display: flex; flex-direction: column;
+  padding: max(12px, env(safe-area-inset-top)) 16px max(14px, env(safe-area-inset-bottom));
+}
+button { font: inherit; color: inherit; border: 0; background: none; padding: 0; cursor: pointer; }
+
+header { display: flex; align-items: center; gap: 10px; height: 44px; flex: none; }
+.logo { width: 30px; height: 30px; border-radius: 9px; background: linear-gradient(135deg, var(--accent), var(--accent-2)); display: grid; place-items: center; font-weight: 800; font-size: 12px; }
+.title { font-weight: 700; font-size: 17px; }
+.status { margin-left: auto; font-size: 13px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.status.on .dot { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+.status.off .dot { background: var(--danger); }
+
+.tabs { display: flex; background: var(--surface); border-radius: 12px; padding: 4px; margin: 8px 0 14px; flex: none; }
+.tabs button { flex: 1; padding: 9px 0; border-radius: 9px; font-size: 13.5px; font-weight: 600; color: var(--muted); }
+.tabs button.sel { background: var(--surface-2); color: var(--text); }
+
+.view { flex: 1; display: flex; flex-direction: column; min-height: 0; gap: 18px; }
+.hidden { display: none !important; }
+
+.row { display: flex; gap: 12px; justify-content: space-between; }
+.key {
+  flex: 1; height: 56px; border-radius: 16px; background: var(--surface); display: flex; align-items: center; justify-content: center; gap: 8px;
+  font-size: 15px; font-weight: 600; transition: transform .08s, background .08s;
+}
+.key svg { width: 22px; height: 22px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+.key.down, .pad-btn.down, .rock button.down { transform: scale(.94); background: var(--surface-2); }
+.key.home { background: linear-gradient(135deg, var(--accent), var(--accent-2)); }
+.key.home.down { filter: brightness(1.15); }
+
+/* Крестовина */
+.dpad-wrap { flex: 1; display: grid; place-items: center; min-height: 230px; }
+.dpad { position: relative; width: min(84vw, 48vh, 360px); aspect-ratio: 1; border-radius: 50%; background: var(--surface); box-shadow: inset 0 0 0 1px var(--line); }
+.dpad .pad-btn { position: absolute; display: grid; place-items: center; transition: transform .08s, background .08s; }
+.dpad .pad-btn svg { width: 30px; height: 30px; stroke: var(--text); fill: none; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+.dpad .u { top: 0; left: 28%; right: 28%; height: 30%; border-radius: 50% 50% 0 0 / 70% 70% 0 0; }
+.dpad .d { bottom: 0; left: 28%; right: 28%; height: 30%; border-radius: 0 0 50% 50% / 0 0 70% 70%; }
+.dpad .l { left: 0; top: 28%; bottom: 28%; width: 30%; border-radius: 50% 0 0 50% / 70% 0 0 70%; }
+.dpad .r { right: 0; top: 28%; bottom: 28%; width: 30%; border-radius: 0 50% 50% 0 / 0 70% 70% 0; }
+.dpad .ok { left: 31%; top: 31%; right: 31%; bottom: 31%; border-radius: 50%; background: var(--surface-2); font-weight: 800; font-size: 20px; box-shadow: 0 6px 20px #0007; }
+.dpad .ok.down { background: var(--accent); transform: scale(.95); }
+.dpad .pad-btn.down:not(.ok) { background: #ffffff10; transform: none; }
+
+/* Качельки громкости и каналов */
+.rockers { display: flex; gap: 12px; align-items: stretch; }
+.rock { width: 76px; border-radius: 18px; background: var(--surface); display: flex; flex-direction: column; overflow: hidden; flex: none; }
+.rock button { flex: 1; height: 54px; display: grid; place-items: center; font-size: 22px; font-weight: 700; transition: background .08s; }
+.rock .lbl { font-size: 11px; color: var(--muted); text-align: center; padding: 2px 0; font-weight: 600; letter-spacing: .06em; }
+.mid { flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.mid .key { height: auto; min-height: 54px; }
+
+/* Цифры */
+.digits { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.digits .key { height: 54px; font-size: 22px; }
+
+/* Тачпад */
+.touch { flex: 1; min-height: 220px; border-radius: 20px; background: var(--surface); box-shadow: inset 0 0 0 1px var(--line); position: relative; touch-action: none; display: grid; place-items: center; }
+.touch .hint { color: var(--muted); font-size: 14px; text-align: center; line-height: 1.6; pointer-events: none; padding: 0 20px; }
+.touch.active { background: #1b2130; }
+.wheel { position: absolute; right: 0; top: 0; bottom: 0; width: 44px; border-left: 1px dashed var(--line); touch-action: none; display: grid; place-items: center; color: var(--muted); font-size: 12px; writing-mode: vertical-rl; }
+
+/* Текст */
+.text-box { display: flex; flex-direction: column; gap: 12px; }
+.text-box textarea {
+  width: 100%; min-height: 110px; resize: none; border-radius: 16px; border: 1px solid var(--line); background: var(--surface);
+  color: var(--text); font: inherit; font-size: 17px; padding: 14px; outline: none; user-select: text; -webkit-user-select: text;
+}
+.text-box textarea:focus { border-color: var(--accent); }
+.key.primary { background: var(--accent); }
+.note { color: var(--muted); font-size: 13px; line-height: 1.5; margin: 0; }
+
+/* Окна */
+.wins-head { display: flex; align-items: center; justify-content: space-between; flex: none; }
+.wins-title { font-size: 15px; font-weight: 700; }
+.refresh { width: 40px; height: 40px; border-radius: 12px; background: var(--surface); display: grid; place-items: center; }
+.refresh svg { width: 20px; height: 20px; stroke: var(--text); fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.refresh.spin svg { animation: spin .7s linear; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.wins { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; margin: 0 -4px; padding: 0 4px 8px; }
+.win { background: var(--surface); border-radius: 16px; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+.win.active { box-shadow: inset 0 0 0 1.5px var(--accent); }
+.win-top { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.win-ava { width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; font-weight: 800; font-size: 15px; flex: none; }
+.win-info { min-width: 0; flex: 1; }
+.win-title { font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.win-app { font-size: 12.5px; color: var(--muted); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.win-app b { color: var(--accent); font-weight: 600; }
+.win-btns { display: flex; gap: 8px; }
+.win-btns button { flex: 1; height: 42px; border-radius: 12px; background: var(--surface-2); font-size: 14px; font-weight: 600; }
+.win-btns button.close { color: var(--danger); }
+.win-btns button.kill { background: var(--danger); color: #fff; }
+.win-btns button:active { transform: scale(.96); }
+.win.closing { opacity: .5; }
+
+.toast { position: fixed; left: 50%; top: calc(max(12px, env(safe-area-inset-top)) + 52px); transform: translateX(-50%); background: var(--surface-2); border: 1px solid var(--line); padding: 10px 16px; border-radius: 12px; font-size: 14px; max-width: 90%; text-align: center; z-index: 5; }
+.fatal { position: fixed; inset: 0; background: var(--bg); display: grid; place-items: center; padding: 32px; text-align: center; z-index: 9; }
+.fatal h2 { margin: 0 0 10px; font-size: 22px; }
+.fatal p { color: var(--muted); line-height: 1.5; margin: 0; }
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">TV</div>
+  <div class="title">Пульт TVHub</div>
+  <div class="status" id="status"><span class="dot"></span><span id="statusText">Подключение…</span></div>
+</header>
+
+<nav class="tabs" id="tabs">
+  <button data-v="buttons" class="sel">Кнопки</button>
+  <button data-v="touch">Тачпад</button>
+  <button data-v="digits">Цифры</button>
+  <button data-v="text">Текст</button>
+  <button data-v="wins">Окна</button>
+</nav>
+
+<!-- Кнопки -->
+<section class="view" id="v-buttons">
+  <div class="row">
+    <button class="key" data-k="back"><svg viewBox="0 0 24 24"><path d="M9 14l-4-4 4-4"/><path d="M5 10h10a4 4 0 0 1 0 8h-3"/></svg>Назад</button>
+    <button class="key home" data-k="home"><svg viewBox="0 0 24 24"><path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/></svg>Домой</button>
+    <button class="key" data-k="menu"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg>Меню</button>
+  </div>
+  <div class="dpad-wrap">
+    <div class="dpad">
+      <button class="pad-btn u" data-k="up" data-repeat><svg viewBox="0 0 24 24"><path d="M6 15l6-6 6 6"/></svg></button>
+      <button class="pad-btn l" data-k="left" data-repeat><svg viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg></button>
+      <button class="pad-btn r" data-k="right" data-repeat><svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></button>
+      <button class="pad-btn d" data-k="down" data-repeat><svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></button>
+      <button class="pad-btn ok" data-k="ok">OK</button>
+    </div>
+  </div>
+  <div class="rockers">
+    <div class="rock">
+      <button data-k="volup" data-repeat>+</button>
+      <div class="lbl">ГРОМК</div>
+      <button data-k="voldown" data-repeat>−</button>
+    </div>
+    <div class="mid">
+      <button class="key" data-k="playpause"><svg viewBox="0 0 24 24"><path d="M5 5l8 7-8 7z"/><path d="M16 5v14M20 5v14"/></svg>Пауза</button>
+      <button class="key" data-k="mute"><svg viewBox="0 0 24 24"><path d="M4 9h4l5-4v14l-5-4H4z"/><path d="M17 9l4 6M21 9l-4 6"/></svg>Без звука</button>
+    </div>
+    <div class="rock">
+      <button data-k="chup" data-repeat>+</button>
+      <div class="lbl">КАНАЛ</div>
+      <button data-k="chdown" data-repeat>−</button>
+    </div>
+  </div>
+</section>
+
+<!-- Тачпад -->
+<section class="view hidden" id="v-touch">
+  <div class="touch" id="touch">
+    <div class="hint">Водите пальцем — двигается курсор<br>Касание — щелчок · Долгое касание — правый щелчок<br>Справа полоса прокрутки</div>
+    <div class="wheel" id="wheel">прокрутка</div>
+  </div>
+  <div class="row">
+    <button class="key" data-k="back">Назад</button>
+    <button class="key home" data-k="home">Домой</button>
+    <button class="key" data-k="esc">Esc</button>
+  </div>
+</section>
+
+<!-- Цифры -->
+<section class="view hidden" id="v-digits">
+  <div class="digits">
+    <button class="key" data-k="1">1</button><button class="key" data-k="2">2</button><button class="key" data-k="3">3</button>
+    <button class="key" data-k="4">4</button><button class="key" data-k="5">5</button><button class="key" data-k="6">6</button>
+    <button class="key" data-k="7">7</button><button class="key" data-k="8">8</button><button class="key" data-k="9">9</button>
+    <button class="key" data-k="back">Назад</button><button class="key" data-k="0">0</button><button class="key" data-k="ok">OK</button>
+  </div>
+  <p class="note">Наберите номер канала во время просмотра: TVHub переключит его через секунду.</p>
+</section>
+
+<!-- Текст -->
+<section class="view hidden" id="v-text">
+  <div class="text-box">
+    <textarea id="txt" placeholder="Например, ссылку на плейлист или название фильма для поиска" autocomplete="off" autocapitalize="off" spellcheck="false"></textarea>
+    <div class="row">
+      <button class="key primary" id="sendTxt">Отправить</button>
+      <button class="key" id="sendEnter">Отправить + Enter</button>
+    </div>
+    <div class="row">
+      <button class="key" data-k="backspace" data-repeat>⌫ Стереть</button>
+      <button class="key" data-k="space">Пробел</button>
+      <button class="key" data-k="enter">Enter</button>
+    </div>
+  </div>
+  <p class="note">Сначала выберите поле ввода на экране (поиск, адрес плейлиста), затем напишите текст здесь и нажмите «Отправить».</p>
+</section>
+
+<!-- Открытые окна -->
+<section class="view hidden" id="v-wins">
+  <div class="wins-head">
+    <div class="wins-title">Открыто на компьютере</div>
+    <button class="refresh" id="winsRefresh" aria-label="Обновить"><svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg></button>
+  </div>
+  <div class="wins" id="wins"><p class="note">Загружаю…</p></div>
+</section>
+
+<div class="toast hidden" id="toast"></div>
+
+<script>
+'use strict';
+const qs = new URLSearchParams(location.search);
+let KEY = qs.get('k') || '';
+try {
+  if (KEY) localStorage.setItem('tvhub-remote', KEY);
+  else KEY = localStorage.getItem('tvhub-remote') || '';
+} catch (e) {}
+
+const $ = (id) => document.getElementById(id);
+let toastT;
+function toast(s, ms = 2200) { const t = $('toast'); t.textContent = s; t.classList.remove('hidden'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.add('hidden'), ms); }
+function setStatus(state, text) { const s = $('status'); s.className = 'status ' + state; $('statusText').textContent = text; }
+function fatal(title, text) {
+  const d = document.createElement('div');
+  d.className = 'fatal';
+  d.innerHTML = `<div><h2>${title}</h2><p>${text}</p></div>`;
+  document.body.append(d);
+}
+function buzz() { if (navigator.vibrate) navigator.vibrate(12); }
+
+let failCount = 0;
+async function post(path, body) {
+  try {
+    const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Remote': KEY }, body: JSON.stringify(body || {}), keepalive: true });
+    if (r.status === 403) { setStatus('off', 'Нет доступа'); fatal('Ссылка устарела', 'Откройте на компьютере TVHub → «Пульт на телефоне» и отсканируйте QR-код заново.'); return false; }
+    if (!r.ok && r.status !== 204) throw new Error(r.status);
+    if (r.status === 200) {
+      const d = await r.json().catch(() => null);
+      if (d && d.warn && Date.now() - (window.lastWarn || 0) > 15000) { window.lastWarn = Date.now(); toast(d.warn, 6000); }
+    }
+    failCount = 0;
+    setStatus('on', 'Подключено');
+    return true;
+  } catch (e) {
+    if (++failCount >= 2) setStatus('off', 'Нет связи');
+    return false;
+  }
+}
+
+// Нажатия отправляются строго по очереди, чтобы не перепутался порядок
+let queue = Promise.resolve();
+function sendKey(k) { buzz(); queue = queue.then(() => post('/r/api/key', { key: k })); }
+
+// ----- Кнопки с повтором при удержании -----
+document.querySelectorAll('[data-k]').forEach((b) => {
+  const k = b.dataset.k;
+  const repeat = b.hasAttribute('data-repeat');
+  let t1, t2;
+  const stop = () => { clearTimeout(t1); clearInterval(t2); b.classList.remove('down'); };
+  b.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    b.classList.add('down');
+    sendKey(k);
+    if (repeat) t1 = setTimeout(() => { t2 = setInterval(() => sendKey(k), 130); }, 420);
+  });
+  ['pointerup', 'pointerleave', 'pointercancel'].forEach((ev) => b.addEventListener(ev, stop));
+  b.addEventListener('contextmenu', (e) => e.preventDefault());
+});
+
+// ----- Вкладки -----
+document.querySelectorAll('#tabs button').forEach((t) => t.addEventListener('click', () => {
+  document.querySelectorAll('#tabs button').forEach((x) => x.classList.toggle('sel', x === t));
+  document.querySelectorAll('.view').forEach((v) => v.classList.toggle('hidden', v.id !== 'v-' + t.dataset.v));
+  try { localStorage.setItem('tvhub-remote-tab', t.dataset.v); } catch (e) {}
+}));
+try { const last = localStorage.getItem('tvhub-remote-tab'); if (last) document.querySelector(`#tabs [data-v="${last}"]`)?.click(); } catch (e) {}
+
+// ----- Текст -----
+async function sendText(enter) {
+  const v = $('txt').value;
+  if (!v) { toast('Напишите текст'); return; }
+  buzz();
+  const ok = await (queue = queue.then(() => post('/r/api/text', { text: v })));
+  if (enter) sendKey('enter');
+  if (ok) { $('txt').value = ''; toast('Отправлено'); }
+}
+$('sendTxt').addEventListener('click', () => sendText(false));
+$('sendEnter').addEventListener('click', () => sendText(true));
+
+// ----- Тачпад -----
+const pad = $('touch');
+let acc = { dx: 0, dy: 0, wheel: 0 }, flushT = null, sending = false;
+function flushMouse() {
+  flushT = null;
+  if (sending) { flushT = setTimeout(flushMouse, 16); return; }
+  const m = { dx: Math.round(acc.dx), dy: Math.round(acc.dy), wheel: Math.round(acc.wheel) };
+  acc.dx -= m.dx; acc.dy -= m.dy; acc.wheel -= m.wheel;
+  if (!m.dx && !m.dy && !m.wheel) return;
+  sending = true;
+  post('/r/api/mouse', m).finally(() => { sending = false; });
+}
+function queueMouse() { if (!flushT) flushT = setTimeout(flushMouse, 30); }
+
+let tp = null;
+pad.addEventListener('pointerdown', (e) => {
+  if (e.target.id === 'wheel') return;
+  pad.setPointerCapture(e.pointerId);
+  pad.classList.add('active');
+  tp = { x: e.clientX, y: e.clientY, t: Date.now(), moved: 0, long: false };
+  tp.longT = setTimeout(() => { if (tp && tp.moved < 8) { tp.long = true; buzz(); post('/r/api/mouse', { click: 'right' }); } }, 550);
+});
+pad.addEventListener('pointermove', (e) => {
+  if (!tp) return;
+  const dx = e.clientX - tp.x, dy = e.clientY - tp.y;
+  tp.x = e.clientX; tp.y = e.clientY;
+  tp.moved += Math.abs(dx) + Math.abs(dy);
+  // Ускорение: быстрые движения уводят курсор дальше
+  const speed = Math.hypot(dx, dy);
+  const gain = 1.6 + Math.min(speed / 6, 3);
+  acc.dx += dx * gain; acc.dy += dy * gain;
+  queueMouse();
+});
+function endTouch() {
+  if (!tp) return;
+  clearTimeout(tp.longT);
+  if (!tp.long && tp.moved < 8 && Date.now() - tp.t < 350) { buzz(); post('/r/api/mouse', { click: 'left' }); }
+  tp = null;
+  pad.classList.remove('active');
+}
+pad.addEventListener('pointerup', endTouch);
+pad.addEventListener('pointercancel', endTouch);
+
+const wheel = $('wheel');
+let wy = null;
+wheel.addEventListener('pointerdown', (e) => { e.stopPropagation(); wheel.setPointerCapture(e.pointerId); wy = e.clientY; });
+wheel.addEventListener('pointermove', (e) => {
+  if (wy === null) return;
+  const d = e.clientY - wy; wy = e.clientY;
+  acc.wheel += -d * 6; queueMouse();
+});
+['pointerup', 'pointercancel'].forEach((ev) => wheel.addEventListener(ev, () => { wy = null; }));
+
+// ----- Открытые окна -----
+const winsBox = $('wins');
+const closeTried = new Map(); // id → время попытки закрыть
+const COLORS = ['#4f8cff', '#8b5cf6', '#e64980', '#f76707', '#12b886', '#1098ad', '#e03131', '#5f3dc4'];
+function colorFor(s) { let h = 0; for (const c of s) h = (h * 31 + c.charCodeAt(0)) >>> 0; return COLORS[h % COLORS.length]; }
+function esc(s) { return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+
+async function winAction(id, action) {
+  buzz();
+  try {
+    const r = await fetch('/r/api/window', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Remote': KEY }, body: JSON.stringify({ id, action }) });
+    const d = await r.json();
+    if (!d.ok) toast(d.error || 'Не получилось');
+    else if (action === 'focus') toast('Открыто на экране');
+    else if (action === 'kill') toast('Программа завершена');
+  } catch (e) { toast('Нет связи с компьютером'); }
+  if (action === 'close') { closeTried.set(id, Date.now()); setTimeout(loadWins, 1500); }
+  else setTimeout(loadWins, 500);
+}
+
+let winsBusy = false;
+async function loadWins() {
+  if (winsBusy) return;
+  winsBusy = true;
+  try {
+    const r = await fetch('/r/api/windows', { headers: { 'X-Remote': KEY } });
+    if (r.status === 403) { fatal('Ссылка устарела', 'Отсканируйте QR-код в TVHub заново.'); return; }
+    const d = await r.json();
+    renderWins(d.windows || []);
+    setStatus('on', 'Подключено');
+  } catch (e) { setStatus('off', 'Нет связи'); }
+  finally { winsBusy = false; }
+}
+
+function renderWins(list) {
+  winsBox.innerHTML = '';
+  const others = list.filter((w) => !w.tvhub);
+  for (const w of list) {
+    const tried = closeTried.get(w.id);
+    const stuck = tried && Date.now() - tried > 1200; // закрывали, а окно всё ещё здесь
+    const card = document.createElement('div');
+    card.className = 'win' + (w.active ? ' active' : '');
+    const letter = (w.tvhub ? 'TV' : (w.app || w.title || '?').trim().slice(0, 1).toUpperCase());
+    const bg = w.tvhub ? 'linear-gradient(135deg, #4f8cff, #8b5cf6)' : colorFor(w.app || w.title);
+    card.innerHTML = `<div class="win-top"><div class="win-ava" style="background:${bg}">${esc(letter)}</div>
+      <div class="win-info"><div class="win-title">${esc(w.title)}</div><div class="win-app">${w.active ? '<b>Сейчас на экране</b> · ' : ''}${esc(w.app)}</div></div></div>`;
+    const btns = document.createElement('div');
+    btns.className = 'win-btns';
+    const mk = (label, cls, fn) => { const b = document.createElement('button'); b.textContent = label; if (cls) b.className = cls; b.onclick = fn; btns.append(b); };
+    if (w.tvhub) {
+      mk('Открыть TVHub', '', () => winAction(w.id, 'focus'));
+      mk('На главный', '', () => sendKey('home'));
+    } else {
+      mk('Открыть', '', () => winAction(w.id, 'focus'));
+      if (stuck) mk('Завершить принудительно', 'kill', () => {
+        if (confirm(`Завершить «${w.title}»? Несохранённые данные пропадут.`)) winAction(w.id, 'kill');
+      });
+      else mk('✕ Закрыть', 'close', () => { card.classList.add('closing'); winAction(w.id, 'close'); });
+    }
+    card.append(btns);
+    winsBox.append(card);
+  }
+  if (!others.length) {
+    const p = document.createElement('p');
+    p.className = 'note';
+    p.textContent = 'Кроме TVHub, ничего не открыто.';
+    winsBox.append(p);
+  }
+  // Забываем про окна, которых больше нет
+  for (const id of closeTried.keys()) if (!list.some((w) => w.id === id)) closeTried.delete(id);
+}
+
+$('winsRefresh').addEventListener('click', () => {
+  const b = $('winsRefresh'); b.classList.remove('spin'); void b.offsetWidth; b.classList.add('spin');
+  buzz(); loadWins();
+});
+// Пока открыта вкладка «Окна», список обновляется сам
+setInterval(() => {
+  if (document.visibilityState === 'visible' && !$('v-wins').classList.contains('hidden')) loadWins();
+}, 3000);
+document.querySelector('#tabs [data-v="wins"]').addEventListener('click', loadWins);
+if (!$('v-wins').classList.contains('hidden')) loadWins();
+
+// ----- Подключение -----
+if (!KEY) {
+  setStatus('off', 'Нет ключа');
+  fatal('Откройте пульт по QR-коду', 'На компьютере в TVHub: «Настройки» → «Пульт на телефоне». Отсканируйте QR-код камерой телефона.');
+} else {
+  post('/r/api/hello').then((ok) => { if (ok) toast('Пульт подключён'); });
+  setInterval(() => { if (document.visibilityState === 'visible') post('/r/api/hello'); }, 20000);
+}
+// Держим экран телефона включённым, пока открыт пульт (где поддерживается)
+async function wake() { try { if (navigator.wakeLock && document.visibilityState === 'visible') await navigator.wakeLock.request('screen'); } catch (e) {} }
+document.addEventListener('visibilitychange', wake);
+wake();
+</script>
+</body>
+</html>

@@ -1,0 +1,55 @@
+name: Выпуск версии
+
+# Новая версия выходит, когда в репозиторий добавляют метку вида v1.2.3.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Проверка кода
+        run: |
+          go vet ./...
+          GOOS=windows go vet ./...
+          go test ./...
+
+      - name: Иконка и манифест Windows
+        run: |
+          go install github.com/tc-hib/go-winres@latest
+          VER="${GITHUB_REF_NAME#v}"
+          "$(go env GOPATH)/bin/go-winres" make --arch amd64 --product-version "$VER" --file-version "$VER"
+
+      - name: Сборка TVHub.exe
+        run: |
+          VER="${GITHUB_REF_NAME#v}"
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath \
+            -ldflags "-s -w -H windowsgui -X main.appVersion=$VER -X main.updateRepo=$GITHUB_REPOSITORY" \
+            -o dist/TVHub.exe .
+
+      - name: Цифровая подпись для автообновления
+        env:
+          UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
+        run: go run ./tools/sign dist/TVHub.exe
+
+      - name: Архив для ручной установки
+        run: |
+          cp README.md dist/
+          cd dist && zip -q TVHub-windows.zip TVHub.exe README.md
+
+      - name: Публикация версии
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/TVHub.exe dist/TVHub.exe.sig dist/TVHub-windows.zip \
+            --title "TVHub ${GITHUB_REF_NAME#v}" --generate-notes

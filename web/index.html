@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TVHub</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<div id="app">
+
+  <!-- Основной экран с вкладками, как в Google TV -->
+  <section id="main" class="screen">
+    <div class="backdrop" id="backdrop"><div class="backdrop-glow" id="backdropGlow"></div><div class="backdrop-img" id="backdropImg"></div></div>
+    <header class="topbar">
+      <div class="avatar f" data-k="tab-profile" id="profileBtn" title="Настройки">TV</div>
+      <button class="vpn f hidden" id="vpnBtn" data-k="top-vpn"><span class="vpn-dot"></span><span id="vpnText">VPN</span></button>
+      <nav class="tabs" id="tabs">
+        <button class="tab f" data-k="tab-home" data-tab="home">Главная</button>
+        <button class="tab f" data-k="tab-tv" data-tab="tv">Телеканалы</button>
+        <button class="tab f" data-k="tab-apps" data-tab="apps">Приложения</button>
+        <button class="tab f" data-k="tab-music" data-tab="music">Музыка</button>
+        <button class="tab f" data-k="tab-settings" data-tab="settings">Настройки</button>
+      </nav>
+      <button class="f topchip wx" id="weatherBtn" data-k="top-weather"></button>
+      <button class="f topchip bell" id="bellBtn" data-k="top-bell"></button>
+      <div class="clock" data-clock></div>
+    </header>
+
+    <div class="panel" id="panel-home">
+      <div class="hero" id="hero">
+        <div class="hero-content">
+          <div class="hero-kicker" id="heroKicker"></div>
+          <h1 class="hero-title" id="heroTitle">Добро пожаловать</h1>
+          <p class="hero-sub" id="heroSub"></p>
+        </div>
+        <div class="hero-art" id="heroArt"></div>
+      </div>
+      <div class="rows" id="homeRows"></div>
+    </div>
+
+    <div class="panel hidden" id="panel-tv">
+      <div class="search" id="search"></div>
+      <div class="ch-layout">
+        <nav class="groups" id="groups"></nav>
+        <div class="ch-grid-wrap" id="chGridWrap"><div class="ch-grid" id="chGrid"></div></div>
+      </div>
+    </div>
+
+    <div class="panel hidden" id="panel-apps">
+      <div class="apps-grid" id="appsGrid"></div>
+    </div>
+
+    <div class="panel hidden" id="panel-music"></div>
+
+    <div class="panel hidden" id="panel-settings">
+      <div class="settings-body" id="settingsBody"></div>
+    </div>
+  </section>
+
+  <!-- Плеер -->
+  <section id="player" class="screen hidden">
+    <video id="video" playsinline></video>
+    <div class="osd hidden" id="osd">
+      <div class="osd-num" id="osdNum"></div>
+      <div class="osd-logo" id="osdLogo"></div>
+      <div class="osd-info">
+        <div class="osd-name" id="osdName"></div>
+        <div class="osd-meta" id="osdMeta"></div>
+        <div class="osd-prog" id="osdProg"></div>
+      </div>
+      <div class="osd-right">
+        <div class="osd-status" id="osdStatus"></div>
+        <div class="clock" data-clock></div>
+      </div>
+    </div>
+    <div class="numentry hidden" id="numEntry"></div>
+    <div class="adbadge hidden" id="adBadge">Реклама · звук выключен</div>
+    <div class="waitchip hidden" id="waitChip"></div>
+    <div class="spinner hidden" id="spinner"></div>
+    <aside class="zap hidden" id="zap">
+      <div class="zap-head" id="zapHead"></div>
+      <div class="zap-list" id="zapList"></div>
+      <div class="zap-hint">OK — смотреть · Меню — в избранное · Назад — закрыть</div>
+    </aside>
+    <aside class="guide hidden" id="guide">
+      <div class="zap-head" id="guideHead"></div>
+      <div class="guide-body">
+        <div class="guide-list" id="guideList"></div>
+        <div class="guide-desc" id="guideDesc"></div>
+      </div>
+      <div class="zap-hint">OK на будущей передаче — напомнить · Назад — закрыть</div>
+    </aside>
+  </section>
+
+  <!-- Проверка пульта -->
+  <section id="keytest" class="screen hidden">
+    <header class="topbar"><div class="tabs"><span class="tab sel">Проверка пульта</span></div><div class="clock" data-clock></div></header>
+    <div class="keytest-body">
+      <div class="kt-big" id="ktBig">Нажмите любую кнопку на пульте</div>
+      <div class="kt-action" id="ktAction"></div>
+      <div class="kt-log" id="ktLog"></div>
+      <p class="kt-hint">Чтобы выйти, нажмите «Назад» два раза подряд. Кнопку «Домой» оболочка перехватывает всегда: если по ней вы попали на главный экран, она работает.</p>
+    </div>
+  </section>
+
+  <div class="modal hidden" id="modal"><div class="modal-box"><div class="modal-text" id="modalText"></div><div class="modal-btns" id="modalBtns"></div></div></div>
+  <div class="toast hidden" id="toast"></div>
+  <div class="banner hidden" id="banner"></div>
+
+  <!-- Заставка -->
+  <div class="saver hidden" id="saver">
+    <div class="sv-img" id="svImg0"></div>
+    <div class="sv-img" id="svImg1"></div>
+    <div class="sv-shade"></div>
+    <div class="sv-music hidden" id="svMusic"></div>
+    <div class="sv-info" id="svInfo">
+      <div class="sv-clock" id="svClock"></div>
+      <div class="sv-date" id="svDate"></div>
+      <div class="sv-weather" id="svWeather"></div>
+    </div>
+    <div class="sv-caption" id="svCaption"></div>
+  </div>
+</div>
+<script src="vendor/hls.min.js"></script>
+<script src="vendor/mpegts.js"></script>
+<script src="extras.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

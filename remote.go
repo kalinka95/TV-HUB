@@ -290,6 +290,15 @@ func startRemoteServer() {
 		}
 		remoteReply(w)
 	}))
+	mux.HandleFunc("POST /r/api/brightness", remoteAuth(func(w http.ResponseWriter, r *http.Request) {
+		var req struct{ Delta int }
+		json.NewDecoder(io.LimitReader(r.Body, 1024)).Decode(&req)
+		level, ds := changeBrightness(0, req.Delta)
+		writeJSON(w, map[string]any{"level": level, "displays": ds})
+	}))
+	mux.HandleFunc("GET /r/api/brightness", remoteAuth(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, map[string]any{"level": currentBrightness()})
+	}))
 	mux.HandleFunc("GET /r/api/windows", remoteAuth(func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]any{"windows": listWindows()})
 	}))

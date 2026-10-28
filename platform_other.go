@@ -160,3 +160,16 @@ func rollbackUpdate() error {
 	return fmt.Errorf("в режиме разработки недоступно")
 }
 func cleanupAfterUpdate() {}
+
+// ---------- Яркость (в режиме разработки — имитация) ----------
+
+type displayInfo struct {
+	Name   string `json:"name"`
+	Method string `json:"method"`
+}
+
+func applyBrightness(level int) []displayInfo {
+	log.Printf("brightness %d", level)
+	return []displayInfo{{Name: "Телевизор (тест)", Method: "gamma"}}
+}
+func resetBrightness() {}

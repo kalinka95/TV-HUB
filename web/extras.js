@@ -830,6 +830,40 @@ function updateSection(inner) {
   inner.append(sec);
 }
 
+// ---------- Яркость ----------
+
+const BR = { level: 100 };
+let brTimer;
+function onBrightnessEvent(ev) {
+  BR.level = ev.level;
+  const o = $('brOsd');
+  const ds = ev.displays || [];
+  const how = ds.length && ds.every((d) => d.method === 'none') ? 'Этот экран не даёт менять яркость'
+    : ds.some((d) => d.method === 'ddc') ? '' : 'Затемнение картинки';
+  o.innerHTML = `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4.5"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M4.9 19.1l1.8-1.8M17.3 6.7l1.8-1.8"/></svg>` +
+    `<div class="br-bar"><i style="width:${ev.level}%"></i></div><b>${ev.level}%</b>` + (how ? `<small>${how}</small>` : '');
+  o.classList.remove('hidden');
+  clearTimeout(brTimer);
+  brTimer = setTimeout(() => o.classList.add('hidden'), 2500);
+  const v = document.getElementById('brModalVal');
+  if (v) v.textContent = ev.level + '%';
+}
+
+async function setBrightness(delta) {
+  try { const r = await api.post('/api/brightness', { delta }); BR.level = r.level; } catch (e) { toast('Ошибка: ' + e.message); }
+}
+
+async function showBrightness() {
+  try { BR.level = (await api.get('/api/brightness')).level; } catch (e) {}
+  const box = el('div', 'br-modal');
+  const minus = btn('☀ −', () => setBrightness(-10), 'br-minus');
+  const plus = btn('☀ +', () => setBrightness(10), 'br-plus');
+  const val = el('div', 'br-modal-val', `<span id="brModalVal">${BR.level}%</span>`);
+  box.append(minus, val, plus);
+  modal('Яркость экрана', [{ label: 'Готово' }], box);
+  setFocus(plus);
+}
+
 // ---------- Запуск ----------
 
 function startExtras() {

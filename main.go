@@ -61,6 +61,7 @@ type Settings struct {
 	SaverMinutes      int    `json:"saverMinutes,omitempty"` // через сколько минут заставка (0 = 10 мин, -1 = выкл)
 	City              *City  `json:"city,omitempty"`         // город для погоды
 	AutoUpdateOff     bool   `json:"autoUpdateOff,omitempty"`
+	Brightness        int    `json:"brightness,omitempty"` // 10–100, 0 = 100
 	VPNHidden         bool   `json:"vpnHidden,omitempty"`
 }
 
@@ -528,6 +529,7 @@ func handleSaveConfig(w http.ResponseWriter, r *http.Request) {
 	c.RemoteKey = cfg.RemoteKey // ключ пульта меняет только сервер
 	c.Settings.RunAsAdmin = cfg.Settings.RunAsAdmin
 	c.Reminders = cfg.Reminders
+	c.Settings.Brightness = cfg.Settings.Brightness
 	prevEPG := cfg.Settings.EPGURL + "|" + cfg.ActivePlaylist
 	cfg = c
 	err := saveConfigLocked()
@@ -643,6 +645,7 @@ func startServer() (string, error) {
 	mux.HandleFunc("GET /api/update", apiAuth(handleUpdate))
 	mux.HandleFunc("POST /api/update", apiAuth(handleUpdateAction))
 	mux.HandleFunc("/api/whatsnew", apiAuth(handleWhatsNew))
+	mux.HandleFunc("/api/brightness", apiAuth(handleBrightness))
 	mux.HandleFunc("GET /api/notices", apiAuth(handleNotices))
 	mux.HandleFunc("POST /api/notices/read", apiAuth(handleNoticesRead))
 	mux.HandleFunc("POST /api/reminder", apiAuth(handleReminder))

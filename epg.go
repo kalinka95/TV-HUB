@@ -548,6 +548,7 @@ func startBackground() {
 	}()
 	go reminderLoop()
 	go updateLoop()
+	go restoreBrightness()
 	cleanupAfterUpdate()
 	go refreshWallpapers()
 }

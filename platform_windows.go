@@ -420,6 +420,7 @@ func runPlatform() {
 	wv.Navigate(strings.TrimSpace(addr))
 	wv.Run()
 	closeWebApp()
+	resetBrightness() // программное затемнение не должно остаться после выхода
 }
 
 func hasArg(a string) bool {

@@ -70,6 +70,12 @@ header { display: flex; align-items: center; gap: 10px; height: 44px; flex: none
 .mid { flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .mid .key { height: auto; min-height: 54px; }
 
+/* Яркость */
+.bright { display: flex; gap: 12px; align-items: center; }
+.bright .key { flex: none; width: 96px; }
+.br-val { flex: 1; text-align: center; font-size: 22px; font-weight: 700; line-height: 1.1; }
+.br-val small { display: block; font-size: 12px; color: var(--muted); font-weight: 600; letter-spacing: .06em; text-transform: uppercase; margin-top: 2px; }
+
 /* Цифры */
 .digits { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
 .digits .key { height: 54px; font-size: 22px; }
@@ -165,6 +171,11 @@ header { display: flex; align-items: center; gap: 10px; height: 44px; flex: none
       <div class="lbl">КАНАЛ</div>
       <button data-k="chdown" data-repeat>−</button>
     </div>
+  </div>
+  <div class="bright">
+    <button class="key" id="brDown" aria-label="Темнее"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.5"/><path d="M12 4v1.5M12 18.5V20M4 12h1.5M18.5 12H20M6.3 6.3l1 1M16.7 16.7l1 1M6.3 17.7l1-1M16.7 7.3l1-1"/></svg>−</button>
+    <div class="br-val"><span id="brVal">—</span><small>яркость</small></div>
+    <button class="key" id="brUp" aria-label="Ярче"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4.5"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M4.9 19.1l1.8-1.8M17.3 6.7l1.8-1.8"/></svg>+</button>
   </div>
 </section>
 
@@ -435,6 +446,27 @@ setInterval(() => {
 }, 3000);
 document.querySelector('#tabs [data-v="wins"]').addEventListener('click', loadWins);
 if (!$('v-wins').classList.contains('hidden')) loadWins();
+
+// ----- Яркость -----
+let brNoted = false;
+async function brightness(delta) {
+  buzz();
+  try {
+    const r = await fetch('/r/api/brightness', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Remote': KEY }, body: JSON.stringify({ delta }) });
+    if (r.status === 403) { fatal('Ссылка устарела', 'Отсканируйте QR-код в TVHub заново.'); return; }
+    const d = await r.json();
+    $('brVal').textContent = d.level + '%';
+    const ds = d.displays || [];
+    if (ds.length && ds.every((x) => x.method === 'none')) toast('Этот экран не даёт менять яркость', 4000);
+    else if (!brNoted && ds.some((x) => x.method && x.method.startsWith('gamma'))) {
+      brNoted = true;
+      toast(ds.some((x) => x.method === 'ddc') ? 'Яркость меняется' : 'Телевизор не даёт менять подсветку — затемняю картинку', 4000);
+    }
+  } catch (e) { toast('Нет связи с компьютером'); }
+}
+$('brDown').addEventListener('click', () => brightness(-10));
+$('brUp').addEventListener('click', () => brightness(10));
+fetch('/r/api/brightness', { headers: { 'X-Remote': KEY } }).then((r) => r.json()).then((d) => { $('brVal').textContent = d.level + '%'; }).catch(() => {});
 
 // ----- Подключение -----
 if (!KEY) {

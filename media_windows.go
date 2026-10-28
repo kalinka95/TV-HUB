@@ -408,8 +408,12 @@ const waveJS = `((step) => {
   }
   if (!t) return 'none|' + location.host + location.pathname + '|' + (wave ? 'карточка волны есть' : 'карточки волны нет') + '|' +
     btns.slice(0, 12).map((b) => label(b).trim().slice(0, 24)).filter(Boolean).join(' / ');
-  t.scrollIntoView({ block: 'center' });
+  // Нажимаем без прокрутки страницы и возвращаем прокрутку на место, если страница сдвинулась сама
+  const scrolled = [];
+  for (let e = t.parentElement; e; e = e.parentElement) if (e.scrollTop) scrolled.push([e, e.scrollTop]);
+  const y = window.scrollY;
   t.click();
+  setTimeout(() => { scrolled.forEach(([e, s]) => { e.scrollTop = s; }); if (window.scrollY !== y) window.scrollTo(0, y); }, 400);
   return 'clicked';
 })`
 

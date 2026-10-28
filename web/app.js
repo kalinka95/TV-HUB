@@ -722,6 +722,9 @@ function renderSettings() {
       `сетевой адаптер VPN — ${vst.tunnel ? esc(vst.tunnel) : 'нет'} · ` +
       `системный прокси — ${vst.proxy ? esc(vst.proxy) : 'нет'}`));
   }
+  vp.append(toggleRow('Российские сервисы открывать без VPN (Кинопоиск, Okko, Wink…)', !c.settings.vpnForRu, () => {
+    c.settings.vpnForRu = !c.settings.vpnForRu; saveCfg(); keepFocus(renderSettings);
+  }, 'set-vpnru'));
   vp.append(toggleRow('Показывать переключатель VPN на главном экране', !c.settings.vpnHidden, () => {
     c.settings.vpnHidden = !c.settings.vpnHidden; saveCfg(); renderVPN(); keepFocus(renderSettings);
   }, 'set-vpnshow'));
@@ -883,6 +886,21 @@ function renderVPN() {
   if (cur === b) setHero(b._info);
 }
 
+// Меню VPN: включить/выключить или открыть окно Happ
+function showVPNMenu() {
+  const st = VPN.st;
+  if (!st || !st.found) return;
+  modal(`VPN ${st.name}: ${st.on ? 'включён' : 'выключен'}`, [
+    { label: st.on ? 'Выключить VPN' : 'Включить VPN', cls: 'primary', act: toggleVPN },
+    { label: `Открыть ${st.name}`, act: async () => {
+      const r = await api.post('/api/vpn', { open: true }).catch((e) => ({ error: e.message }));
+      if (r.error) toast(r.error, 6000);
+      else toast(`Открыл ${st.name}. Вернуться — «Домой»`);
+    } },
+    { label: 'Отмена' },
+  ]);
+}
+
 async function toggleVPN() {
   if (!VPN.st || VPN.busy) return;
   const want = !VPN.st.on;
@@ -932,6 +950,7 @@ function listenEvents() {
     else if (ev.type === 'epg') loadEPGNow();
     else if (ev.type === 'update') onUpdateEvent(ev);
     else if (ev.type === 'brightness') onBrightnessEvent(ev);
+    else if (ev.type === 'vpn') refreshVPN();
     else if (ev.type === 'home') window.tvHome();
     else if (ev.type === 'music') window.tvMusic();
     else if (ev.type === 'screen') window.tvShow(ev.name);
@@ -1576,7 +1595,7 @@ async function init() {
   }
   listenEvents();
   const vb = $('vpnBtn');
-  vb._act = toggleVPN;
+  vb._act = showVPNMenu;
   refreshVPN();
   setInterval(() => { if (!VPN.busy && S.screen === 'main') refreshVPN(); }, 5000);
   switchTab('home');

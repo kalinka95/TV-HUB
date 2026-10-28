@@ -282,3 +282,16 @@ func setVPN(on bool) error {
 	showHapp(p)
 	return errNeedClick
 }
+
+// openVPNApp выводит окно Happ на экран (запускает, если закрыт).
+func openVPNApp() error {
+	p := findVPN()
+	if p == "" {
+		return errors.New("Happ не найден. Укажите путь к Happ.exe в «Настройки» → «VPN»")
+	}
+	if !selfElevated() && happElevated(filepath.Dir(p)) {
+		return errHappAdmin
+	}
+	showHapp(p)
+	return nil
+}

@@ -36,8 +36,32 @@ func appProfile(a App) string {
 		return "browser-music"
 	case a.UserAgent != "":
 		return "browser-" + a.ID
+	case !isRuService(a):
+		return "browser-intl" // зарубежные сайты — отдельно, чтобы им не мешал обход VPN
 	}
 	return "browser"
+}
+
+// bypassVPN — открывать ли сервис в обход VPN (российские сервисы, если не выключено в настройках).
+func bypassVPN(a App) bool {
+	cfgMu.Lock()
+	off := cfg.Settings.VPNForRu
+	cfgMu.Unlock()
+	return !off && isRuService(a)
+}
+
+// prepareRuService: если VPN работает «туннелем» (весь трафик через VPN), обойти его нельзя —
+// выключаем VPN перед открытием российского сервиса и сообщаем об этом.
+func prepareRuService(a App) {
+	if !bypassVPN(a) || vpnTunnel() == "" {
+		return
+	}
+	if err := setVPN(false); err != nil && err != errNeedClick {
+		notify("vpn", "Не удалось выключить VPN для «"+a.Name+"»", err.Error(), nil)
+		return
+	}
+	notify("vpn", "VPN выключен, чтобы открылся «"+a.Name+"»", "Российские сервисы не работают через VPN. Включить его снова — кнопка VPN вверху", nil)
+	pushEvent(map[string]string{"type": "vpn"})
 }
 
 func profileDir(name string) string { return filepath.Join(dataDir, name) }
@@ -351,6 +375,15 @@ func openWebApp(a App) error {
 		return windows.ShellExecute(0, nil, windows.StringToUTF16Ptr(a.Target), nil, nil, 1)
 	}
 	dir := profileDir(appProfile(a))
+	prepareRuService(a)
+	// Edge, запущенный без нужной настройки обхода VPN, перезапускаем
+	if _, main := profileProcs(dir); main != 0 && bypassVPN(a) != strings.Contains(processCmdline(main), "--no-proxy-server") {
+		killProfile(dir)
+		time.Sleep(700 * time.Millisecond)
+		appWinMu.Lock()
+		delete(appWins, a.ID)
+		appWinMu.Unlock()
+	}
 	// 1. Окно этого приложения уже открыто — просто показываем его
 	appWinMu.Lock()
 	h := appWins[a.ID]
@@ -411,6 +444,9 @@ func openWebApp(a App) error {
 	}
 	if a.UserAgent != "" {
 		args = append(args, "--user-agent="+a.UserAgent)
+	}
+	if bypassVPN(a) {
+		args = append(args, "--no-proxy-server") // в обход системного прокси VPN
 	}
 	cfgMu.Lock()
 	dark := cfg.Settings.DarkSites

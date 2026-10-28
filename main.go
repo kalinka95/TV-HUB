@@ -25,7 +25,7 @@ import (
 )
 
 // Версию подставляет сборка на GitHub (-ldflags -X main.appVersion=…)
-var appVersion = "1.3.2"
+var appVersion = "1.3.3"
 
 //go:embed web
 var webFS embed.FS
@@ -63,6 +63,7 @@ type Settings struct {
 	AutoUpdateOff     bool   `json:"autoUpdateOff,omitempty"`
 	Brightness        int    `json:"brightness,omitempty"` // 10–100, 0 = 100
 	DarkSites         bool   `json:"darkSites,omitempty"`  // Edge затемняет сайты без своей тёмной темы
+	VPNForRu          bool   `json:"vpnForRu,omitempty"`   // true = российские сервисы тоже через VPN
 	VPNHidden         bool   `json:"vpnHidden,omitempty"`
 }
 
@@ -688,8 +689,16 @@ func startServer() (string, error) {
 	})
 	mux.HandleFunc("GET /api/vpn", apiAuth(func(w http.ResponseWriter, r *http.Request) { writeJSON(w, vpnStatus()) }))
 	mux.HandleFunc("POST /api/vpn", apiAuth(func(w http.ResponseWriter, r *http.Request) {
-		var req struct{ On bool }
+		var req struct{ On, Open bool }
 		json.NewDecoder(io.LimitReader(r.Body, 1024)).Decode(&req)
+		if req.Open { // показать окно Happ
+			if err := openVPNApp(); err != nil {
+				writeJSON(w, map[string]any{"error": err.Error()})
+				return
+			}
+			writeJSON(w, vpnStatus())
+			return
+		}
 		if err := setVPN(req.On); err != nil {
 			st := vpnStatus()
 			if err == errNeedClick {

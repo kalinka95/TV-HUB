@@ -311,7 +311,33 @@ func fullscreenTarget(port, targetID string) {
 	}
 }
 
-var webLaunchMu sync.Mutex
+var (
+	webLaunchMu sync.Mutex
+	appWinMu    sync.Mutex
+	appWins     = map[string]uintptr{} // приложение → его окно (запоминаем сразу после открытия)
+)
+
+// browserWindows — все видимые окна Edge/Chrome сейчас.
+func browserWindows() map[uintptr]bool {
+	enumMu.Lock()
+	enumList = nil
+	procEnumWindows.Call(enumCB, 0)
+	list := enumList
+	enumMu.Unlock()
+	out := map[uintptr]bool{}
+	for _, it := range list {
+		if it.exe == "msedge.exe" || it.exe == "chrome.exe" {
+			out[it.hwnd] = true
+		}
+	}
+	return out
+}
+
+func rememberAppWindow(id string, h uintptr) {
+	appWinMu.Lock()
+	appWins[id] = h
+	appWinMu.Unlock()
+}
 
 // openWebApp выводит уже открытое окно сервиса или открывает новое.
 func openWebApp(a App) error {
@@ -322,21 +348,38 @@ func openWebApp(a App) error {
 		return windows.ShellExecute(0, nil, windows.StringToUTF16Ptr(a.Target), nil, nil, 1)
 	}
 	dir := profileDir(appProfile(a))
+	// 1. Окно этого приложения уже открыто — просто показываем его
+	appWinMu.Lock()
+	h := appWins[a.ID]
+	appWinMu.Unlock()
+	if h != 0 {
+		if alive, _, _ := procIsWindow.Call(h); alive != 0 {
+			focusWindow(h)
+			return nil
+		}
+	}
 	if _, main := profileProcs(dir); main != 0 {
-		if list, port := cdpTargets(dir); port != "" {
-			for _, t := range list {
-				if t.Type == "page" && sameSite(t.URL, a.Target) {
-					if h := windowOfProfile(dir, t.Title); h != 0 {
-						focusWindow(h)
-					} else if t.WS != "" {
-						cdpCall(t.WS, "Page.bringToFront", map[string]any{})
-					}
-					fullscreenTarget(port, t.ID)
-					return nil
+		list, port := cdpTargets(dir)
+		if port == "" {
+			// Edge открыт прежней версией TVHub, и им нельзя управлять — перезапускаем его один раз
+			killProfile(dir)
+			time.Sleep(700 * time.Millisecond)
+		}
+		// 2. Ищем окно сайта через Edge (например, после перезапуска TVHub)
+		for _, t := range list {
+			if t.Type == "page" && sameSite(t.URL, a.Target) {
+				if h := windowOfProfile(dir, t.Title); h != 0 {
+					focusWindow(h)
+					rememberAppWindow(a.ID, h)
+				} else if t.WS != "" {
+					cdpCall(t.WS, "Page.bringToFront", map[string]any{})
 				}
+				fullscreenTarget(port, t.ID)
+				return nil
 			}
 		}
 	}
+	before := browserWindows()
 	args := []string{
 		"--user-data-dir=" + dir,
 		"--no-first-run", "--no-default-browser-check",
@@ -358,6 +401,18 @@ func openWebApp(a App) error {
 		return err
 	}
 	go c.Wait()
+	// Запоминаем новое окно, чтобы в следующий раз показать именно его
+	go func() {
+		for i := 0; i < 60; i++ {
+			time.Sleep(200 * time.Millisecond)
+			for w := range browserWindows() {
+				if !before[w] {
+					rememberAppWindow(a.ID, w)
+					return
+				}
+			}
+		}
+	}()
 	// Новое окно в уже запущенном Edge открывается не на весь экран — разворачиваем сами
 	go func() {
 		for i := 0; i < 40; i++ {

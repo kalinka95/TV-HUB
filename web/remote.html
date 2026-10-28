@@ -144,6 +144,7 @@ header { display: flex; align-items: center; gap: 10px; height: 44px; flex: none
     <div class="sheet-title">Пульт TVHub</div>
     <button class="key" id="volToggle"></button>
     <button class="key" id="rescanBtn">Подключиться к другому компьютеру</button>
+    <button class="key hidden" id="appUpdBtn">Проверить обновление приложения</button>
     <button class="key" id="sheetClose">Закрыть</button>
   </div>
 </div>
@@ -492,6 +493,12 @@ if (window.TVHubApp) {
   m.addEventListener('click', () => { label(); sh.classList.remove('hidden'); });
   vt.addEventListener('click', () => { TVHubApp.setVolumeKeys(!TVHubApp.volumeKeys()); label(); buzz(); });
   $('rescanBtn').addEventListener('click', () => TVHubApp.rescan());
+  if (TVHubApp.checkUpdate) {
+    const ub = $('appUpdBtn');
+    ub.classList.remove('hidden');
+    try { ub.textContent = 'Проверить обновление приложения (сейчас ' + TVHubApp.version() + ')'; } catch (e) {}
+    ub.addEventListener('click', () => { sh.classList.add('hidden'); TVHubApp.checkUpdate(); });
+  }
   $('sheetClose').addEventListener('click', () => sh.classList.add('hidden'));
   sh.addEventListener('click', (e) => { if (e.target === sh) sh.classList.add('hidden'); });
 }

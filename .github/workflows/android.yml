@@ -43,9 +43,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           cp android/app/build/outputs/apk/release/app-release.apk TVHub-Remote.apk
+          # По этому файлу приложение узнаёт, что вышла новая версия
+          echo "{\"versionCode\": ${{ github.run_number }}, \"versionName\": \"1.0.${{ github.run_number }}\"}" > version.json
           if ! gh release view remote-app --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release create remote-app --repo "$GITHUB_REPOSITORY" --prerelease --latest=false \
               --title "Пульт TVHub для Android" \
               --notes "Приложение-пульт для телефона на Android. Установите TVHub-Remote.apk и отсканируйте QR-код в TVHub («Система» → «Пульт на телефоне»)."
           fi
-          gh release upload remote-app TVHub-Remote.apk --clobber --repo "$GITHUB_REPOSITORY"
+          gh release upload remote-app TVHub-Remote.apk version.json --clobber --repo "$GITHUB_REPOSITORY"

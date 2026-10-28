@@ -2,6 +2,7 @@ package ru.tvhub.remote;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.Intent;
 import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.graphics.Typeface;
@@ -26,6 +27,13 @@ import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.TextView;
+
+import org.json.JSONObject;
+
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.net.HttpURLConnection;
+import java.net.URL;
 
 import com.google.mlkit.vision.barcode.common.Barcode;
 import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions;
@@ -59,6 +67,69 @@ public class MainActivity extends Activity {
         String url = prefs.getString("url", "");
         if (url.isEmpty()) showSetup(null);
         else openRemote(url);
+        checkUpdate(false);
+    }
+
+    // ---------- Новые версии приложения ----------
+
+    private static final String RELEASE = "https://github.com/" + BuildConfig.REPO + "/releases/download/remote-app/";
+
+    /** Проверяет, вышла ли новая версия приложения (не чаще раза в 6 часов, если не просили вручную). */
+    private void checkUpdate(boolean manual) {
+        long last = prefs.getLong("updateChecked", 0);
+        if (!manual && System.currentTimeMillis() - last < 6 * 3600_000L) return;
+        new Thread(() -> {
+            try {
+                HttpURLConnection c = (HttpURLConnection) new URL(RELEASE + "version.json").openConnection();
+                c.setConnectTimeout(8000);
+                c.setReadTimeout(8000);
+                c.setInstanceFollowRedirects(true);
+                StringBuilder sb = new StringBuilder();
+                try (BufferedReader r = new BufferedReader(new InputStreamReader(c.getInputStream(), "UTF-8"))) {
+                    for (String l; (l = r.readLine()) != null; ) sb.append(l);
+                }
+                JSONObject v = new JSONObject(sb.toString());
+                int code = v.getInt("versionCode");
+                String name = v.optString("versionName", String.valueOf(code));
+                prefs.edit().putLong("updateChecked", System.currentTimeMillis()).apply();
+                runOnUiThread(() -> {
+                    if (code > BuildConfig.VERSION_CODE) offerUpdate(name);
+                    else if (manual) toastDialog("У вас последняя версия приложения (" + BuildConfig.VERSION_NAME + ").");
+                });
+            } catch (Exception e) {
+                if (manual) runOnUiThread(() -> toastDialog("Не удалось проверить обновление. Проверьте интернет на телефоне."));
+            }
+        }).start();
+    }
+
+    private void toastDialog(String msg) {
+        new AlertDialog.Builder(this).setMessage(msg).setPositiveButton("Хорошо", null).show();
+    }
+
+    private void offerUpdate(String version) {
+        new AlertDialog.Builder(this)
+                .setTitle("Новая версия приложения " + version)
+                .setMessage("Скачать новую версию пульта? Сейчас у вас " + BuildConfig.VERSION_NAME + ".")
+                .setPositiveButton("Скачать", (d, w) -> {
+                    startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(RELEASE + "TVHub-Remote.apk")));
+                    explainInstall();
+                })
+                .setNegativeButton("Позже", null)
+                .show();
+    }
+
+    /** Новая версия подписана другим ключом, поэтому старую нужно удалить перед установкой. */
+    private void explainInstall() {
+        new AlertDialog.Builder(this)
+                .setTitle("Как установить")
+                .setMessage("1. Дождитесь, пока файл TVHub-Remote.apk скачается.\n\n"
+                        + "2. Удалите эту версию приложения — кнопка ниже.\n\n"
+                        + "3. Откройте TVHub-Remote.apk в «Загрузках» и установите.\n\n"
+                        + "4. В новом приложении один раз отсканируйте QR-код пульта в TVHub.")
+                .setPositiveButton("Удалить эту версию", (d, w) ->
+                        startActivity(new Intent(Intent.ACTION_DELETE, Uri.parse("package:" + getPackageName()))))
+                .setNegativeButton("Позже", null)
+                .show();
     }
 
     // ---------- Подключение ----------
@@ -229,6 +300,16 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public void rescan() {
             runOnUiThread(() -> showSetup(null));
+        }
+
+        @JavascriptInterface
+        public void checkUpdate() {
+            runOnUiThread(() -> MainActivity.this.checkUpdate(true));
+        }
+
+        @JavascriptInterface
+        public String version() {
+            return BuildConfig.VERSION_NAME;
         }
 
         @JavascriptInterface

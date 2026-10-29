@@ -947,15 +947,38 @@ function showVPNMenu() {
     ]);
     return;
   }
-  modal(`VPN ${st.name}: ${st.on ? 'включён' : 'выключен'}`, [
-    { label: st.on ? 'Выключить VPN' : 'Включить VPN', cls: 'primary', act: toggleVPN },
-    { label: `Открыть ${st.name}`, act: async () => {
+  showVPNPanel();
+}
+
+// Окно VPN в стиле TVHub: состояние, страна выхода, российские сайты напрямую или нет, задержка
+function showVPNPanel() {
+  const st = VPN.st;
+  if (!st || !st.found) return;
+  const box = el('div', 'vpn-panel');
+  box.innerHTML = `<div class="vp-hero"><div class="vp-ring ${st.on ? 'on' : ''}"><svg viewBox="0 0 24 24"><path d="M12 3l8 3v6c0 4.5-3.4 8.3-8 9-4.6-.7-8-4.5-8-9V6z"/>${st.on ? '<path d="M8.5 12.2l2.4 2.4 4.6-4.8"/>' : ''}</svg></div>` +
+    `<div><div class="vp-state">${st.on ? 'VPN включён' : 'VPN выключен'}</div><div class="vp-sub" id="vpSub">${esc(st.name)}</div></div></div>` +
+    '<div class="vp-rows" id="vpRows"><div class="vp-row"><span>Проверяю подключение…</span><b></b></div></div>';
+  modal('', [
+    { label: st.on ? 'Выключить VPN' : 'Включить VPN', cls: 'primary', act: async () => { await toggleVPN(); setTimeout(showVPNPanel, 300); } },
+    { label: 'Проверить ещё раз', act: () => setTimeout(showVPNPanel, 50) },
+    { label: `Сменить сервер в ${st.name}`, act: async () => {
       const r = await api.post('/api/vpn', { open: true }).catch((e) => ({ error: e.message }));
       if (r.error) toast(r.error, 6000);
-      else toast(`Открыл ${st.name}. Вернуться — «Домой»`);
+      else toast(`Открыл ${st.name}: выберите сервер (удобно тачпадом на пульте). Вернуться — «Домой»`, 7000);
     } },
-    { label: 'Отмена' },
-  ]);
+    { label: 'Закрыть' },
+  ], box);
+  api.get('/api/vpn/info').then((i) => {
+    if (!box.isConnected) return;
+    const row = (k, v, cls = '') => `<div class="vp-row"><span>${k}</span><b class="${cls}">${v}</b></div>`;
+    let html = '';
+    if (i.country) html += row(i.on ? 'Выход в интернет' : 'Ваш интернет', `<i class="vp-cc">${esc(i.cc || '')}</i>${esc(i.country)}${i.city ? ', ' + esc(i.city) : ''}`);
+    if (typeof i.ruDirect === 'boolean') html += row('Российские сайты', i.ruDirect ? 'напрямую ✓' : 'через VPN — могут не открываться', i.ruDirect ? 'ok' : 'bad');
+    if (i.pingMs) html += row('Задержка', `${i.pingMs} мс`, i.pingMs < 150 ? 'ok' : i.pingMs < 400 ? '' : 'bad');
+    if (i.mode) html += row('Режим', esc(i.mode));
+    $('vpRows').innerHTML = html || row('Не удалось проверить подключение', '');
+    if (i.ruDirect === false && i.on) $('vpRows').insertAdjacentHTML('beforeend', '<p class="vp-tip">Совет: в Happ → «Маршрутизация» включите «Россия напрямую» — тогда Кинопоиск и другие российские сервисы будут работать с включённым VPN.</p>');
+  }).catch(() => { if (box.isConnected) $('vpRows').innerHTML = '<div class="vp-row"><span>Не удалось проверить подключение</span><b></b></div>'; });
 }
 
 async function toggleVPN() {

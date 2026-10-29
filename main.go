@@ -25,7 +25,7 @@ import (
 )
 
 // Версию подставляет сборка на GitHub (-ldflags -X main.appVersion=…)
-var appVersion = "1.6.4"
+var appVersion = "1.6.5"
 
 //go:embed web
 var webFS embed.FS
@@ -757,6 +757,7 @@ func startServer() (string, error) {
 		w.Write(b)
 	})
 	mux.HandleFunc("/api/ownvpn", apiAuth(handleOwnVPN))
+	mux.HandleFunc("GET /api/vpn/info", apiAuth(func(w http.ResponseWriter, r *http.Request) { writeJSON(w, vpnInfo()) }))
 	mux.HandleFunc("GET /api/vpn", apiAuth(func(w http.ResponseWriter, r *http.Request) { writeJSON(w, anyVPNStatus()) }))
 	mux.HandleFunc("POST /api/vpn", apiAuth(func(w http.ResponseWriter, r *http.Request) {
 		var req struct{ On, Open bool }

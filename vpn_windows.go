@@ -4,6 +4,7 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -627,4 +628,47 @@ func systemProxyURL() string {
 		p = "http://" + p
 	}
 	return p
+}
+
+// vpnInfo — для окна VPN в TVHub: через какую страну выходим в интернет, идут ли российские
+// сайты напрямую и какая задержка. Проверяем тем же путём, каким ходят браузеры (через прокси VPN, если он есть).
+func vpnInfo() map[string]any {
+	on, tun, proxy := vpnConnected()
+	out := map[string]any{"on": on, "tunnel": tun, "proxy": proxy}
+	mode := ""
+	switch {
+	case tun != "":
+		mode = "весь компьютер (TUN)"
+	case proxy != "":
+		mode = "системный прокси"
+	}
+	out["mode"] = mode
+	c := &http.Client{Timeout: 5 * time.Second}
+	if p := systemProxyURL(); p != "" {
+		if pu, err := url.Parse(p); err == nil {
+			c = &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{Proxy: http.ProxyURL(pu)}}
+		}
+	}
+	// Задержка — сколько идёт короткий запрос в Google (через VPN, если он включён)
+	t := time.Now()
+	if resp, err := c.Get("https://www.gstatic.com/generate_204"); err == nil {
+		resp.Body.Close()
+		out["pingMs"] = time.Since(t).Milliseconds()
+	}
+	// Где мы в интернете
+	if resp, err := c.Get("http://ip-api.com/json/?fields=status,country,countryCode,city,query&lang=ru"); err == nil {
+		var r struct {
+			Status, Country, CountryCode, City, Query string
+		}
+		json.NewDecoder(io.LimitReader(resp.Body, 4096)).Decode(&r)
+		resp.Body.Close()
+		if r.Status == "success" {
+			out["ip"], out["country"], out["cc"], out["city"] = r.Query, r.Country, r.CountryCode, r.City
+		}
+	}
+	foreign, known := ruTrafficForeignVia(systemProxyURL())
+	if known {
+		out["ruDirect"] = !foreign
+	}
+	return out
 }

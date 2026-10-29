@@ -248,3 +248,7 @@ func happOffForOwn()    {}
 func ownVPNStartup()    { go refreshOwnSubscription() }
 
 func openEQConfigurator() error { log.Printf("eq configurator"); return nil }
+
+func vpnInfo() map[string]any {
+	return map[string]any{"on": true, "mode": "системный прокси", "pingMs": 87, "ip": "185.1.2.3", "country": "Нидерланды", "cc": "NL", "city": "Амстердам", "ruDirect": true}
+}

@@ -485,3 +485,21 @@ button, input { font: inherit; color: inherit; }
 .srch-empty { color: var(--muted); font-size: 1.2rem; padding: 1rem 0; }
 .grp-search span { color: var(--accent); font-weight: 700; }
 
+
+/* ---------- Окно VPN ---------- */
+.vpn-panel { min-width: 44rem; text-align: left; }
+.vp-hero { display: flex; align-items: center; gap: 1.6rem; margin-bottom: 1.6rem; }
+.vp-ring { width: 6.4rem; height: 6.4rem; border-radius: 50%; display: grid; place-items: center; background: #ffffff12; flex: none; transition: background .3s; }
+.vp-ring svg { width: 3.2rem; height: 3.2rem; fill: none; stroke: var(--muted); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.vp-ring.on { background: radial-gradient(circle, #2fbf7155, #2fbf7122); box-shadow: 0 0 2.4rem #2fbf7155; }
+.vp-ring.on svg { stroke: #2fbf71; }
+.vp-state { font-size: 2.2rem; font-weight: 800; }
+.vp-sub { font-size: 1.15rem; color: var(--muted); margin-top: .2rem; }
+.vp-rows { display: flex; flex-direction: column; gap: .5rem; }
+.vp-row { display: flex; justify-content: space-between; gap: 2rem; padding: .8rem 1.1rem; border-radius: .8rem; background: #ffffff0d; font-size: 1.2rem; }
+.vp-row span { color: var(--muted); }
+.vp-row b { font-weight: 700; text-align: right; }
+.vp-row b.ok { color: #2fbf71; }
+.vp-row b.bad { color: #ff8a8a; }
+.vp-cc { font-style: normal; font-size: .9rem; font-weight: 800; background: #ffffff22; border-radius: .35rem; padding: .05rem .4rem; margin-right: .6rem; }
+.vp-tip { font-size: 1.05rem; color: var(--muted); margin: .8rem 0 0; line-height: 1.45; }

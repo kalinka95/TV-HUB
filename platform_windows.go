@@ -427,6 +427,15 @@ func waitUIReady() {
 }
 
 // showScreen выводит TVHub на экран и открывает нужную вкладку («Музыка», «Настройки»).
+// tvFront выводит TVHub на экран поверх открытых сайтов и программ (их звук ставим на паузу).
+func tvFront() {
+	if wv == nil {
+		return
+	}
+	go pauseWebApps()
+	wv.Dispatch(bringToFront)
+}
+
 func showScreen(name string) {
 	if wv == nil {
 		return

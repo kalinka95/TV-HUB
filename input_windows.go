@@ -134,6 +134,10 @@ func sendRemoteKey(k string) {
 
 // sendRemoteText печатает текст с клавиатуры телефона в активное окно (любой язык).
 func sendRemoteText(t string) {
+	if tvhubInFront() { // в самом TVHub (поиск каналов, поля настроек) — передаём текст напрямую
+		pushEvent(map[string]string{"type": "text", "text": t})
+		return
+	}
 	var in []kbInput
 	for _, u := range utf16.Encode([]rune(t)) {
 		if u == '\n' {

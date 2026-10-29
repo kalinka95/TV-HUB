@@ -91,6 +91,7 @@ let cur = null;
 
 function scopeEl() {
   if (!$('modal').classList.contains('hidden')) return $('modal');
+  if (SR.open) return $('srch');
   if (S.screen === 'player') return guideOpen() ? $('guide') : ($('zap').classList.contains('hidden') ? null : $('zap'));
   return $(S.screen);
 }
@@ -157,7 +158,7 @@ function move(dir) {
   }
   const r = cur.getBoundingClientRect();
   // Сначала ищем в том же прокручиваемом списке (даже за краем экрана), и только потом — снаружи
-  const SCROLLERS = '.settings-body, .rows, .ch-grid-wrap, .groups, .zap-list, .guide-list, .nt-list, .apps-grid';
+  const SCROLLERS = '.srch-res, .settings-body, .rows, .ch-grid-wrap, .groups, .zap-list, .guide-list, .nt-list, .apps-grid';
   const box = cur.closest(SCROLLERS);
   const pick = (cands) => {
     if (dir === 'up' || dir === 'down') {
@@ -445,6 +446,11 @@ function renderTV() {
   const favCount = S.channels.filter((c) => isFav(c.url)).length;
   const groups = [{ id: '__all', name: 'Все каналы', count: S.channels.length }, { id: '__fav', name: '★ Избранное', count: favCount }]
     .concat(S.groups.map((x) => ({ id: x.name, name: x.name, count: x.count })));
+  const sb = el('button', 'f grp grp-search', '<span>🔍 Поиск канала</span>');
+  sb.dataset.k = 'g:__search';
+  sb._act = () => openSearch();
+  sb._info = { kicker: 'Телеканалы', title: 'Поиск канала', sub: 'По названию или номеру. Можно набрать на телефоне — кнопка «ТВ» на пульте' };
+  g.append(sb);
   for (const gr of groups) {
     const b = el('button', 'f grp' + (gr.id === S.tvGroup ? ' active' : ''));
     b.dataset.k = 'g:' + gr.id;
@@ -471,7 +477,7 @@ function renderGrid() {
   const list = filteredChannels();
   $('search').innerHTML = S.search
     ? `Поиск: <b>${esc(S.search)}</b> · найдено ${list.length} · Backspace — стереть`
-    : 'Наберите название канала на клавиатуре для поиска';
+    : 'Поиск: OK на «🔍 Поиск канала» или наберите название буквами';
   if (S.chLoading) { grid.append(el('div', 'grid-more', 'Загружаю список каналов…')); return; }
   if (!list.length) {
     grid.append(el('div', 'grid-more', S.tvGroup === '__fav' ? 'В избранном пока пусто. Нажмите «Меню» на канале, чтобы добавить его.' : (S.chError ? 'Ошибка: ' + esc(S.chError) : 'Ничего не найдено')));
@@ -940,13 +946,16 @@ function listenEvents() {
     else if (ev.type === 'home') window.tvHome();
     else if (ev.type === 'music') window.tvMusic();
     else if (ev.type === 'screen') window.tvShow(ev.name);
+    else if (ev.type === 'search') onSearchEvent(ev);
+    else if (ev.type === 'play') onPlayEvent(ev);
     else if (ev.type === 'appShown') hideLaunch(500);
     else if (ev.type === 'key') {
       const key = KEYS[ev.key] || ev.key;
       if (key.length === 1 && cur && cur.tagName === 'INPUT' && /[0-9 ]/.test(key)) { cur.setRangeText(key, cur.selectionStart, cur.selectionEnd, 'end'); return; }
       onKey(new KeyboardEvent('keydown', { key }));
     } else if (ev.type === 'text') {
-      if (cur && cur.tagName === 'INPUT') { cur.setRangeText(ev.text, cur.selectionStart, cur.selectionEnd, 'end'); }
+      if (SR.open) srType(ev.text.toLowerCase());
+      else if (cur && cur.tagName === 'INPUT') { cur.setRangeText(ev.text, cur.selectionStart, cur.selectionEnd, 'end'); }
       else for (const ch of ev.text) onKey(new KeyboardEvent('keydown', { key: ch }));
     }
   };
@@ -1033,6 +1042,7 @@ function hideLaunch(delay) {
 
 // Вызывается с пульта: показать вкладку («Музыка», «Настройки») на экране
 window.tvShow = function (name) {
+  closeSearch();
   hideSaver();
   hideLaunch(0);
   if (!$('modal').classList.contains('hidden')) closeModal();
@@ -1046,6 +1056,7 @@ window.tvMusic = () => window.tvShow('music');
 
 // Вызывается из Go, когда нажата кнопка «Домой» на пульте
 window.tvHome = function () {
+  closeSearch();
   hideSaver();
   hideLaunch(0);
   if (!$('modal').classList.contains('hidden')) closeModal();
@@ -1361,7 +1372,8 @@ function playerKey(k, e) {
   switch (k) {
     case 'up': case 'chup': zap(1); break;
     case 'down': case 'chdown': zap(-1); break;
-    case 'ok': case 'left': openZap(); break;
+    case 'ok': openSearch(); break; // OK — поиск канала (без запроса — каналы рядом с текущим)
+    case 'left': openZap(); break;
     case 'right': openGuide(); break;
     case 'info': showOSD(); break;
     case 'back': exitPlayer(); break;
@@ -1450,6 +1462,8 @@ function onKey(e) {
   }
   if (k === 'home') { e.preventDefault(); window.tvHome(); return; }
   if (k === 'fullscreen') { e.preventDefault(); api.post('/api/system', { action: 'fullscreen' }); return; }
+  // Окно поиска каналов: буквы, «Стереть» и «Назад»
+  if (SR.open && $('modal').classList.contains('hidden') && searchKey(k, e)) { e.preventDefault(); return; }
 
   // Поле ввода: печатаем как обычно, стрелки вверх/вниз уводят из поля
   if (cur && cur.tagName === 'INPUT' && document.activeElement === cur) {
@@ -1462,18 +1476,16 @@ function onKey(e) {
     return;
   }
 
-  if (S.screen === 'player' && $('modal').classList.contains('hidden') && $('zap').classList.contains('hidden') && !guideOpen()) {
+  if (S.screen === 'player' && !SR.open && $('modal').classList.contains('hidden') && $('zap').classList.contains('hidden') && !guideOpen()) {
     if (playerKey(k, e)) e.preventDefault();
     return;
   }
 
   // Поиск каналов набором с клавиатуры
   if (S.screen === 'main' && S.tab === 'tv' && $('modal').classList.contains('hidden') && cur && cur.closest('#panel-tv')) {
-    if (e.key.length === 1 && !e.ctrlKey && !e.altKey && /[\p{L}\p{N} +\-]/u.test(e.key) && !(e.key === ' ' && !S.search)) {
+    if (e.key.length === 1 && !e.ctrlKey && !e.altKey && /[\p{L}\p{N} +\-]/u.test(e.key) && e.key !== ' ') {
       e.preventDefault();
-      S.search += e.key;
-      renderGrid();
-      focusFirst($('chGrid'));
+      openSearch(e.key.toLowerCase()); // набор букв сразу открывает поиск
       return;
     }
     if (k === 'backspace' && S.search) {

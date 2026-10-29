@@ -309,6 +309,57 @@ func startRemoteServer() {
 		cfgMu.Unlock()
 		writeJSON(w, map[string]any{"version": appVersion, "city": city, "weatherError": werr, "music": mediaDiag()})
 	}))
+	// Поиск каналов с телефона: список найденных, открыть поиск на экране, включить канал
+	mux.HandleFunc("GET /r/api/channels", remoteAuth(func(w http.ResponseWriter, r *http.Request) {
+		ch, _ := getChannels(false)
+		list := displayChannels(ch)
+		q := r.URL.Query().Get("q")
+		var found []Channel
+		if searchNorm(q) == "" {
+			cfgMu.Lock()
+			fav := map[string]bool{}
+			for _, u := range cfg.Favorites {
+				fav[u] = true
+			}
+			last := cfg.LastChannel
+			cfgMu.Unlock()
+			for _, c := range list { // без запроса — последний канал и избранное
+				if c.URL == last {
+					found = append([]Channel{c}, found...)
+				} else if fav[c.URL] && len(found) < 40 {
+					found = append(found, c)
+				}
+			}
+		} else {
+			found = searchChannels(list, q, 40)
+		}
+		type item struct {
+			N     int    `json:"n"`
+			Name  string `json:"name"`
+			Group string `json:"group,omitempty"`
+			Logo  string `json:"logo,omitempty"`
+			URL   string `json:"url"`
+		}
+		out := []item{}
+		for _, c := range found {
+			out = append(out, item{c.N, c.Name, c.Group, c.Logo, c.URL})
+		}
+		writeJSON(w, map[string]any{"channels": out, "total": len(list)})
+	}))
+	mux.HandleFunc("POST /r/api/search", remoteAuth(func(w http.ResponseWriter, r *http.Request) {
+		var req struct{ Q string }
+		json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&req)
+		tvFront()
+		pushEvent(map[string]any{"type": "search", "q": req.Q})
+		remoteReply(w)
+	}))
+	mux.HandleFunc("POST /r/api/play", remoteAuth(func(w http.ResponseWriter, r *http.Request) {
+		var req struct{ URL string }
+		json.NewDecoder(io.LimitReader(r.Body, 8192)).Decode(&req)
+		tvFront()
+		pushEvent(map[string]any{"type": "play", "url": req.URL})
+		remoteReply(w)
+	}))
 	// Эквалайзер звука компьютера
 	mux.HandleFunc("/r/api/eq", remoteAuth(handleEQ))
 	// Музыка на пульте: что играет, управление, показать экран музыки на ноутбуке

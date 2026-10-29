@@ -25,3 +25,11 @@ func TestRussify(t *testing.T) {
 		}
 	}
 }
+
+func TestRussifyGroup(t *testing.T) {
+	for in, want := range map[string]string{"News": "Новости", "Animation;Kids": "Мультфильмы, Детские", "Общие": "Общие", "Undefined": "Без категории", "Movies;Movie": "Кино", "Telemarket": "Telemarket"} {
+		if got := russifyGroup(in); got != want {
+			t.Errorf("%q: %q, ждали %q", in, got, want)
+		}
+	}
+}

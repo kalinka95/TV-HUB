@@ -460,3 +460,27 @@ button, input { font: inherit; color: inherit; }
 .launch-bar { width: 22rem; height: .3rem; margin: 0 auto; border-radius: .2rem; background: #ffffff1f; overflow: hidden; }
 .launch-bar i { display: block; width: 35%; height: 100%; border-radius: .2rem; background: #fff; animation: launchBar 1.2s ease-in-out infinite; }
 @keyframes launchBar { 0% { transform: translateX(-110%); } 100% { transform: translateX(320%); } }
+
+/* ---------- Поиск каналов ---------- */
+.srch { position: absolute; inset: 0; z-index: 9; display: grid; grid-template-columns: minmax(0, 1fr) 40rem; gap: 3.5rem;
+  padding: 4rem 5rem 3rem; background: #07090ef0; backdrop-filter: blur(14px); }
+.srch.over-video { background: linear-gradient(90deg, #07090ef5 0%, #07090ee6 60%, #07090ecc 100%); }
+.srch-left { display: flex; flex-direction: column; min-width: 0; }
+.srch-title { font-size: 1.2rem; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); font-weight: 700; }
+.srch-q { margin-top: 1rem; font-size: 3.4rem; font-weight: 700; min-height: 4.6rem; padding: .4rem 1.4rem; border-radius: 1rem;
+  background: var(--surface); display: flex; align-items: center; overflow: hidden; white-space: nowrap; }
+.srch-caret { width: .22rem; height: 3rem; background: var(--accent); margin-left: .25rem; animation: srBlink 1s steps(1) infinite; flex: none; }
+@keyframes srBlink { 50% { opacity: 0; } }
+.srch-hint { margin-top: .8rem; font-size: 1.05rem; color: var(--muted); }
+.srch-kb { margin-top: 2rem; display: flex; flex-direction: column; gap: .7rem; }
+.srch-row { display: flex; gap: .7rem; }
+.srch-k { flex: none; width: 4.4rem; height: 4.4rem; border-radius: .8rem; border: 0; background: var(--surface); font-size: 1.6rem; font-weight: 600; }
+.srch-k.wide { width: auto; padding: 0 1.6rem; font-size: 1.2rem; }
+.srch-k.focus { background: var(--text); color: var(--bg); transform: scale(1.08); box-shadow: none; }
+.srch-right { display: flex; flex-direction: column; min-height: 0; }
+.srch-head { font-size: 1.2rem; font-weight: 700; color: var(--muted); margin-bottom: .8rem; letter-spacing: .02em; }
+.srch-res { flex: 1; overflow: hidden; display: flex; flex-direction: column; gap: .2rem; }
+.srch-item .nm small { display: block; font-size: .95rem; color: var(--muted); margin-top: .1rem; overflow: hidden; text-overflow: ellipsis; }
+.srch-item.focus .nm small { color: #0a0c11b3; }
+.srch-empty { color: var(--muted); font-size: 1.2rem; padding: 1rem 0; }
+.grp-search span { color: var(--accent); font-weight: 700; }

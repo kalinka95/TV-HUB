@@ -226,3 +226,5 @@ func openEQDownload() error { log.Printf("eq download"); return nil }
 func systemProxyURL() string { return os.Getenv("TVHUB_TEST_PROXY") }
 
 func mediaDiag() map[string]any { return map[string]any{"dev": true} }
+
+func tvFront() {}

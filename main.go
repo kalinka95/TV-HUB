@@ -25,7 +25,7 @@ import (
 )
 
 // Версию подставляет сборка на GitHub (-ldflags -X main.appVersion=…)
-var appVersion = "1.4.1"
+var appVersion = "1.4.2"
 
 //go:embed web
 var webFS embed.FS
@@ -613,6 +613,9 @@ func displayChannels(ch []Channel) []Channel {
 	out := make([]Channel, len(ch))
 	for i, c := range ch {
 		clean := cleanName(c.Name)
+		if !latin {
+			c.Group = russifyGroup(c.Group)
+		}
 		if latin {
 			c.Name = clean
 		} else if ru := russifyName(c.Name); ru != clean {

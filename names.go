@@ -221,3 +221,45 @@ func translitWord(w string) string {
 	}
 	return string(res)
 }
+
+// Названия категорий из плейлистов (обычно английские) — по-русски.
+var groupRu = map[string]string{
+	"general": "Общие", "news": "Новости", "entertainment": "Развлекательные", "movies": "Кино", "movie": "Кино",
+	"kids": "Детские", "children": "Детские", "music": "Музыка", "sports": "Спорт", "sport": "Спорт",
+	"documentary": "Познавательные", "religious": "Религия", "religion": "Религия", "undefined": "Без категории",
+	"lifestyle": "Образ жизни", "culture": "Культура", "education": "Образование", "educational": "Образование",
+	"business": "Бизнес", "cooking": "Кулинария", "food": "Кулинария", "travel": "Путешествия",
+	"comedy": "Юмор", "series": "Сериалы", "animation": "Мультфильмы", "cartoons": "Мультфильмы",
+	"classic": "Классика", "family": "Семейные", "legislative": "Власть", "outdoor": "Природа и отдых",
+	"science": "Наука", "shop": "Магазины", "shopping": "Магазины", "weather": "Погода", "auto": "Авто",
+	"relax": "Релакс", "public": "Общественные", "local": "Региональные", "regional": "Региональные",
+	"xxx": "Для взрослых", "adult": "Для взрослых", "history": "История", "nature": "Природа",
+	"hobby": "Хобби", "health": "Здоровье", "fashion": "Мода", "games": "Игры", "gaming": "Игры",
+	"other": "Другие", "others": "Другие", "information": "Информационные", "info": "Информационные",
+	"federal": "Федеральные", "hd": "HD-каналы", "uhd": "4K", "4k": "4K", "radio": "Радио",
+}
+
+// russifyGroup переводит категорию; составные («Animation;Kids») — по частям.
+func russifyGroup(g string) string {
+	if hasCyrillic(g) || g == "" {
+		return g
+	}
+	parts := strings.FieldsFunc(g, func(r rune) bool { return r == ';' || r == '|' || r == '/' || r == ',' })
+	var out []string
+	seen := map[string]bool{}
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		ru, ok := groupRu[strings.ToLower(p)]
+		if !ok {
+			ru = p
+		}
+		if !seen[ru] {
+			seen[ru] = true
+			out = append(out, ru)
+		}
+	}
+	if len(out) == 0 {
+		return g
+	}
+	return strings.Join(out, ", ")
+}

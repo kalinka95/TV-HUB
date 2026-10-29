@@ -130,6 +130,21 @@ header { display: flex; align-items: center; gap: 10px; height: 44px; flex: none
 .mu { position: relative; isolation: isolate; display: flex; flex-direction: column; align-items: center; text-align: center; gap: 8px; padding: 6px 0 12px; }
 .diag { position: fixed; inset: 0; z-index: 60; background: #0a0c11f2; display: grid; gap: 10px; padding: 16px; grid-template-rows: auto 1fr auto auto; }
 .diag textarea { width: 100%; box-sizing: border-box; background: var(--surface); color: var(--text); border: 1px solid var(--line); border-radius: 12px; padding: 10px; font: 12px/1.4 monospace; resize: none; }
+.tvkey { height: 52px; font-size: 15px; }
+.tvs { position: fixed; inset: 0; z-index: 55; background: var(--bg); display: flex; flex-direction: column; padding: 14px 16px; gap: 10px; }
+.tvs-head { display: flex; gap: 8px; }
+.tvs-head input { flex: 1; min-width: 0; height: 50px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); color: var(--text); font-size: 17px; padding: 0 14px; outline: none; }
+.tvs-head input:focus { border-color: var(--accent); }
+.tvs-head .key { flex: none; width: auto; padding: 0 14px; height: 50px; font-size: 14px; }
+.tvs-note { color: var(--muted); font-size: 13px; }
+.tvs-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; -webkit-overflow-scrolling: touch; }
+.tvs-item { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 12px; background: var(--surface); text-align: left; width: 100%; color: var(--text); }
+.tvs-item:active { background: var(--surface-2); }
+.tvs-item .n { width: 34px; color: var(--muted); font-variant-numeric: tabular-nums; font-size: 14px; flex: none; }
+.tvs-item .lg { width: 44px; height: 30px; flex: none; display: grid; place-items: center; }
+.tvs-item .lg img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.tvs-item .nm { flex: 1; min-width: 0; font-size: 16px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tvs-item .nm small { display: block; font-size: 12px; color: var(--muted); font-weight: 400; }
 .mu-shade { position: relative; z-index: 2; display: grid; gap: 10px; background: #161a23e6; border-radius: 14px; padding: 12px 14px; margin-bottom: 12px; font-size: 13.5px; line-height: 1.45; color: var(--muted); text-align: left; }
 .mu-shade .key { height: 44px; font-size: 14px; }
 .mu-bgimg { position: fixed; inset: -20%; background-size: cover; background-position: center; filter: blur(60px) saturate(1.4) brightness(.55); opacity: 0; transition: opacity 1s, background-image 1s; z-index: 0; pointer-events: none; }
@@ -232,6 +247,7 @@ header { display: flex; align-items: center; gap: 10px; height: 44px; flex: none
     <button class="key home" data-k="home"><svg viewBox="0 0 24 24"><path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/></svg>Домой</button>
     <button class="key" data-k="menu"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg>Меню</button>
   </div>
+  <div class="row"><button class="key tvkey" id="tvSearchBtn"><svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M8 2l4 4 4-4"/></svg>ТВ · поиск канала</button></div>
   <div class="dpad-wrap">
     <div class="dpad">
       <button class="pad-btn u" data-k="up" data-repeat><svg viewBox="0 0 24 24"><path d="M6 15l6-6 6 6"/></svg></button>
@@ -357,6 +373,15 @@ header { display: flex; align-items: center; gap: 10px; height: 44px; flex: none
   </div>
   <div class="wins" id="wins"><p class="note">Загружаю…</p></div>
 </section>
+
+<div class="tvs hidden" id="tvs">
+  <div class="tvs-head">
+    <input id="tvsQ" type="search" placeholder="Название или номер канала" autocomplete="off" enterkeyhint="search">
+    <button class="key" id="tvsClose">Закрыть</button>
+  </div>
+  <div class="tvs-note" id="tvsNote"></div>
+  <div class="tvs-list" id="tvsList"></div>
+</div>
 
 <div class="toast hidden" id="toast"></div>
 
@@ -649,6 +674,50 @@ function checkShade() {
   b.onclick = () => { buzz(); act && act(); setTimeout(checkShade, 3000); };
 }
 document.querySelector('#tabs [data-v="music"]').addEventListener('click', checkShade);
+
+// ----- Кнопка «ТВ»: поиск канала на телефоне, то же видно на телевизоре -----
+const TVS = { timer: 0, seq: 0 };
+async function tvsLoad() {
+  const q = $('tvsQ').value;
+  const seq = ++TVS.seq;
+  let d;
+  try {
+    const r = await fetch('/r/api/channels?q=' + encodeURIComponent(q), { headers: { 'X-Remote': KEY } });
+    d = await r.json();
+  } catch (e) { $('tvsNote').textContent = 'Нет связи с компьютером'; return; }
+  if (seq !== TVS.seq) return;
+  const list = $('tvsList');
+  list.innerHTML = '';
+  $('tvsNote').textContent = q.trim() ? (d.channels.length ? `Найдено: ${d.channels.length}${d.channels.length === 40 ? '+' : ''} — нажмите, чтобы включить на телевизоре` : 'Ничего не найдено')
+    : (d.channels.length ? 'Последний канал и избранное' : `Каналов в списке: ${d.total}. Наберите название`);
+  for (const c of d.channels) {
+    const b = document.createElement('button');
+    b.className = 'tvs-item';
+    const lg = c.logo ? `<img src="${c.logo.replace(/"/g, '')}" alt="" referrerpolicy="no-referrer" onerror="this.remove()">` : '';
+    b.innerHTML = `<span class="n">${c.n}</span><span class="lg">${lg}</span><span class="nm"></span>`;
+    b.querySelector('.nm').textContent = c.name;
+    if (c.group) { const sm = document.createElement('small'); sm.textContent = c.group; b.querySelector('.nm').append(sm); }
+    b.onclick = () => { buzz(); post('/r/api/play', { url: c.url }); toast('Включаю «' + c.name + '»'); closeTVS(); };
+    list.append(b);
+  }
+}
+function openTVS() {
+  buzz();
+  $('tvs').classList.remove('hidden');
+  $('tvsQ').value = '';
+  post('/r/api/search', { q: '' }); // на телевизоре открывается окно поиска
+  tvsLoad();
+  setTimeout(() => $('tvsQ').focus(), 50);
+}
+function closeTVS() { $('tvs').classList.add('hidden'); $('tvsQ').blur(); }
+$('tvSearchBtn').addEventListener('click', openTVS);
+$('tvsClose').addEventListener('click', () => { closeTVS(); post('/r/api/key', { key: 'back' }); });
+$('tvsQ').addEventListener('input', () => {
+  clearTimeout(TVS.timer);
+  TVS.timer = setTimeout(() => { tvsLoad(); post('/r/api/search', { q: $('tvsQ').value }); }, 250);
+});
+$('tvsQ').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); const f = $('tvsList').querySelector('.tvs-item'); if (f) f.click(); } });
+
 
 // Отчёт для разработчика: что TVHub видит про музыку, сердечко и погоду — его можно скопировать и прислать
 $('diagBtn').addEventListener('click', async () => {

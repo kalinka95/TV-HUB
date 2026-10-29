@@ -25,7 +25,7 @@ import (
 )
 
 // Версию подставляет сборка на GitHub (-ldflags -X main.appVersion=…)
-var appVersion = "1.4.3"
+var appVersion = "1.4.4"
 
 //go:embed web
 var webFS embed.FS
@@ -70,18 +70,19 @@ type Settings struct {
 }
 
 type Config struct {
-	Playlists      []Playlist      `json:"playlists"`
-	ActivePlaylist string          `json:"activePlaylist"`
-	Apps           []App           `json:"apps"`
-	Favorites      []string        `json:"favorites"`
-	LastChannel    string          `json:"lastChannel"`
-	Settings       Settings        `json:"settings"`
-	RemoteKey      string          `json:"remoteKey"` // секрет в ссылке пульта на телефоне
-	Reminders      []Reminder      `json:"reminders,omitempty"`
-	YaMusicAdded   bool            `json:"yaMusicAdded,omitempty"`
-	ClearCity      bool            `json:"clearCity,omitempty"` // только в запросе: убрать город
-	Likes          map[string]bool `json:"likes,omitempty"`     // треки, отмеченные «Мне нравится» через TVHub
-	AdultPin       string          `json:"adultPin,omitempty"`  // PIN для каналов 18+ (хранится в виде отпечатка)
+	Playlists        []Playlist      `json:"playlists"`
+	ActivePlaylist   string          `json:"activePlaylist"`
+	Apps             []App           `json:"apps"`
+	Favorites        []string        `json:"favorites"`
+	LastChannel      string          `json:"lastChannel"`
+	Settings         Settings        `json:"settings"`
+	RemoteKey        string          `json:"remoteKey"` // секрет в ссылке пульта на телефоне
+	Reminders        []Reminder      `json:"reminders,omitempty"`
+	YaMusicAdded     bool            `json:"yaMusicAdded,omitempty"`
+	ClearCity        bool            `json:"clearCity,omitempty"`        // только в запросе: убрать город
+	Likes            map[string]bool `json:"likes,omitempty"`            // треки, отмеченные «Мне нравится» через TVHub
+	AdultPin         string          `json:"adultPin,omitempty"`         // PIN для каналов 18+ (хранится в виде отпечатка)
+	DeletedPlaylists []Playlist      `json:"deletedPlaylists,omitempty"` // недавно удалённые — их можно вернуть
 }
 
 const tvUA = "Mozilla/5.0 (SMART-TV; LINUX; Tizen 6.0) AppleWebKit/537.36 (KHTML, like Gecko) 85.0.4183.93/6.0 TV Safari/537.36"
@@ -572,6 +573,7 @@ func handleSaveConfig(w http.ResponseWriter, r *http.Request) {
 	c.Settings.DarkSites = cfg.Settings.DarkSites
 	c.Settings.EQ = cfg.Settings.EQ
 	c.Likes = cfg.Likes
+	c.DeletedPlaylists = deletedPlaylists(cfg.DeletedPlaylists, cfg.Playlists, c.Playlists)
 	c.AdultPin, c.Settings.Adult = cfg.AdultPin, cfg.Settings.Adult // меняются только через /api/adult
 	if c.Settings.City == nil {                                     // город сбрасывается только явно, не из-за устаревшей копии настроек
 		c.Settings.City = cfg.Settings.City
@@ -812,4 +814,28 @@ func main() {
 	applyRemoteSetting()
 	startBackground()
 	runPlatform()
+}
+
+// deletedPlaylists запоминает плейлисты, которые убрали из списка (последние 10), чтобы их можно было вернуть.
+func deletedPlaylists(prev, before, after []Playlist) []Playlist {
+	now := map[string]bool{}
+	for _, p := range after {
+		now[p.URL] = true
+	}
+	var out []Playlist
+	seen := map[string]bool{}
+	add := func(p Playlist) {
+		if p.URL == "" || now[p.URL] || seen[p.URL] || len(out) >= 10 {
+			return
+		}
+		seen[p.URL] = true
+		out = append(out, p)
+	}
+	for _, p := range before { // только что удалённые — первыми
+		add(p)
+	}
+	for _, p := range prev {
+		add(p)
+	}
+	return out
 }

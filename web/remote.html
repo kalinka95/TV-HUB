@@ -130,8 +130,11 @@ header { display: flex; align-items: center; gap: 10px; height: 44px; flex: none
 .mu { position: relative; isolation: isolate; display: flex; flex-direction: column; align-items: center; text-align: center; gap: 8px; padding: 6px 0 12px; }
 .diag { position: fixed; inset: 0; z-index: 60; background: #0a0c11f2; display: grid; gap: 10px; padding: 16px; grid-template-rows: auto 1fr auto auto; }
 .diag textarea { width: 100%; box-sizing: border-box; background: var(--surface); color: var(--text); border: 1px solid var(--line); border-radius: 12px; padding: 10px; font: 12px/1.4 monospace; resize: none; }
+.tv-now { font-weight: 800; font-size: 15px; letter-spacing: .02em; color: #fff; background: linear-gradient(135deg, var(--accent), var(--accent-2)) !important; }
+@media (max-width: 440px) { header .title { display: none; } }
 .tvkey { height: 52px; font-size: 15px; }
-.tvs { position: fixed; inset: 0; z-index: 55; background: var(--bg); display: flex; flex-direction: column; padding: 14px 16px; gap: 10px; }
+.tvs { position: fixed; left: 0; right: 0; top: 0; height: 100%; z-index: 55; background: var(--bg); display: flex; flex-direction: column;
+  padding: max(14px, env(safe-area-inset-top)) 16px 10px; gap: 10px; box-sizing: border-box; }
 .tvs-head { display: flex; gap: 8px; }
 .tvs-head input { flex: 1; min-width: 0; height: 50px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); color: var(--text); font-size: 17px; padding: 0 14px; outline: none; }
 .tvs-head input:focus { border-color: var(--accent); }
@@ -215,6 +218,7 @@ header { display: flex; align-items: center; gap: 10px; height: 44px; flex: none
   <div class="logo">TV</div>
   <div class="title">Пульт TVHub</div>
   <div class="status" id="status"><span class="dot"></span><span id="statusText">Подключение…</span></div>
+  <button class="app-menu tv-now" id="tvNow" aria-label="Включить телевизор: последний канал">ТВ</button>
   <button class="app-menu" id="tvSettings" aria-label="Настройки на телевизоре"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
   <button class="app-menu hidden" id="appMenu" aria-label="Настройки приложения">⋯</button>
 </header>
@@ -707,10 +711,26 @@ function openTVS() {
   $('tvsQ').value = '';
   post('/r/api/search', { q: '' }); // на телевизоре открывается окно поиска
   tvsLoad();
-  setTimeout(() => $('tvsQ').focus(), 50);
+  fitTVS();
+  setTimeout(() => { $('tvsQ').focus({ preventScroll: true }); fitTVS(); }, 50);
 }
 function closeTVS() { $('tvs').classList.add('hidden'); $('tvsQ').blur(); }
+// Клавиатура телефона: окно поиска сжимается над ней, а не уезжает под шторку
+function fitTVS() {
+  const vv = window.visualViewport;
+  if (!vv) return;
+  const t = $('tvs');
+  t.style.height = vv.height + 'px';
+  t.style.top = vv.offsetTop + 'px';
+}
+if (window.visualViewport) {
+  visualViewport.addEventListener('resize', fitTVS);
+  visualViewport.addEventListener('scroll', fitTVS);
+}
 $('tvSearchBtn').addEventListener('click', openTVS);
+// Кнопка «ТВ» вверху: на телевизоре сразу включается последний канал
+$('tvNow').addEventListener('click', () => { buzz(); post('/r/api/tv', {}); toast('Включаю последний канал'); });
+
 $('tvsClose').addEventListener('click', () => { closeTVS(); post('/r/api/key', { key: 'back' }); });
 $('tvsQ').addEventListener('input', () => {
   clearTimeout(TVS.timer);

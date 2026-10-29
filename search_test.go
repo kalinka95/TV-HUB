@@ -23,3 +23,15 @@ func TestSearchChannels(t *testing.T) {
 		t.Fatal(r)
 	}
 }
+
+func TestDeletedPlaylists(t *testing.T) {
+	a, b, c := Playlist{ID: "1", URL: "a"}, Playlist{ID: "2", URL: "b"}, Playlist{ID: "3", URL: "c"}
+	got := deletedPlaylists([]Playlist{c}, []Playlist{a, b}, []Playlist{b})
+	if len(got) != 2 || got[0].URL != "a" || got[1].URL != "c" {
+		t.Fatal(got)
+	}
+	// вернули — из удалённых пропадает
+	if got := deletedPlaylists(got, []Playlist{b}, []Playlist{b, a}); len(got) != 1 || got[0].URL != "c" {
+		t.Fatal(got)
+	}
+}

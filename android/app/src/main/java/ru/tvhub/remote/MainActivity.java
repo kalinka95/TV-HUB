@@ -70,6 +70,15 @@ public class MainActivity extends Activity {
         root = new FrameLayout(this);
         root.setBackgroundColor(BG);
         setContentView(root);
+        // Android 15 растягивает приложение под шторку и клавиатуру. Пока открыта клавиатура,
+        // поджимаем страницу снизу, чтобы поле ввода и список не уезжали под неё и под шторку.
+        if (Build.VERSION.SDK_INT >= 35) {
+            root.setOnApplyWindowInsetsListener((v, insets) -> {
+                int ime = insets.getInsets(android.view.WindowInsets.Type.ime()).bottom;
+                v.setPadding(0, 0, 0, ime);
+                return insets;
+            });
+        }
         String url = prefs.getString("url", "");
         if (url.isEmpty()) showSetup(null);
         else openRemote(url);

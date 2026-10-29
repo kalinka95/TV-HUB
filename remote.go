@@ -358,6 +358,11 @@ func startRemoteServer() {
 		pushEvent(map[string]any{"type": "search", "q": req.Q})
 		remoteReply(w)
 	}))
+	mux.HandleFunc("POST /r/api/tv", remoteAuth(func(w http.ResponseWriter, r *http.Request) {
+		tvFront()
+		pushEvent(map[string]any{"type": "tv"})
+		remoteReply(w)
+	}))
 	mux.HandleFunc("POST /r/api/play", remoteAuth(func(w http.ResponseWriter, r *http.Request) {
 		var req struct{ URL string }
 		json.NewDecoder(io.LimitReader(r.Body, 8192)).Decode(&req)

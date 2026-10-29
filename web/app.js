@@ -625,12 +625,37 @@ function renderSettings() {
     r.append(btn('Удалить', () => modal(`Удалить плейлист «${p.name}»?`, [
       { label: 'Удалить', cls: 'danger', act: () => {
         c.playlists = c.playlists.filter((x) => x !== p);
+        c.deletedPlaylists = [p, ...(c.deletedPlaylists || []).filter((x) => x.url !== p.url)].slice(0, 10);
         if (active) c.activePlaylist = c.playlists[0] ? c.playlists[0].id : '';
         saveCfg().then(() => loadChannels(true));
         renderSettings(); focusFirst($('panel-settings'));
       } },
       { label: 'Отмена' },
     ]), 'pl-del:' + p.id, 'danger'));
+    pl.append(r);
+  }
+  // Вернуть удалённый плейлист или стандартный список открытых каналов
+  const restore = (p) => {
+    const np = { id: 'pl' + uid(), name: p.name || 'Плейлист', url: p.url };
+    c.playlists.push(np);
+    c.activePlaylist = np.id;
+    c.deletedPlaylists = (c.deletedPlaylists || []).filter((x) => x.url !== p.url);
+    saveCfg().then(() => loadChannels(true));
+    keepFocus(renderSettings);
+    toast(`Плейлист «${np.name}» возвращён и выбран`);
+  };
+  const del = (c.deletedPlaylists || []).filter((d) => !c.playlists.some((x) => x.url === d.url));
+  for (const d of del) {
+    const r = el('div', 's-row');
+    r.innerHTML = `<div class="grow"><div class="title">${esc(d.name)}<span class="badge">Удалён</span></div><div class="sub">${esc(d.url)}</div></div>`;
+    r.append(btn('Вернуть', () => restore(d), 'pl-back:' + d.url, 'primary'));
+    pl.append(r);
+  }
+  const STD = { name: 'Открытые каналы России (iptv-org)', url: 'https://iptv-org.github.io/iptv/countries/ru.m3u' };
+  if (!c.playlists.some((x) => x.url === STD.url) && !del.some((x) => x.url === STD.url)) {
+    const r = el('div', 's-row');
+    r.innerHTML = `<div class="grow"><div class="title">${esc(STD.name)}</div><div class="sub">Бесплатный список открытых российских каналов, который был в TVHub сначала</div></div>`;
+    r.append(btn('Добавить', () => restore(STD), 'pl-std', 'primary'));
     pl.append(r);
   }
   const plForm = el('div', 'form');
@@ -955,6 +980,7 @@ function listenEvents() {
     else if (ev.type === 'screen') window.tvShow(ev.name);
     else if (ev.type === 'search') onSearchEvent(ev);
     else if (ev.type === 'play') onPlayEvent(ev);
+    else if (ev.type === 'tv') tvNow();
     else if (ev.type === 'appShown') hideLaunch(500);
     else if (ev.type === 'key') {
       const key = KEYS[ev.key] || ev.key;

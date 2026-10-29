@@ -169,3 +169,15 @@ function onPlayEvent(ev) {
   srPlay(ch, S.channels);
 }
 window.tvSearch = (q) => openSearch(q || '');
+
+// Кнопка «ТВ» на пульте: последний канал (или первый в списке). Если канал уже идёт — просто убираем окна.
+function tvNow() {
+  closeSearch();
+  if (typeof hideSaver === 'function') hideSaver();
+  if (!$('modal').classList.contains('hidden')) closeModal();
+  if (S.screen === 'player' && P.ch) { if (typeof closeZap === 'function') closeZap(); return; }
+  const list = visibleChannels();
+  const ch = list.find((c) => c.url === S.cfg.lastChannel) || list[0];
+  if (!ch) { toast(S.chLoading ? 'Список каналов ещё загружается' : 'Нет каналов — добавьте плейлист в настройках'); return; }
+  playChannel(ch, list);
+}

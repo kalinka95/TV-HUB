@@ -1093,6 +1093,7 @@ function listenEvents() {
     else if (ev.type === 'play') onPlayEvent(ev);
     else if (ev.type === 'tv') tvNow();
     else if (ev.type === 'appShown') hideLaunch(500);
+    else if (ev.type === 'conn') loadConn();
     else if (ev.type === 'launch' && ev.app) { if ($('launch').classList.contains('hidden')) { closeSearch(); hideSaver(); showLaunch(ev.app); } }
     else if (ev.type === 'key') {
       const key = KEYS[ev.key] || ev.key;
@@ -1115,7 +1116,9 @@ function openSettingsAt(key) {
 
 let modalReturn = null;
 function modal(text, buttons, extra) {
-  modalReturn = cur;
+  if (!$('modal').classList.contains('hidden')) modalReturn = modalReturn || cur; // окно сменилось другим — вернёмся туда же
+  else modalReturn = cur;
+  $('modal').firstElementChild.classList.remove('qs-box');
   $('modalText').textContent = text;
   if (extra) $('modalText').append(extra);
   const box = $('modalBtns');

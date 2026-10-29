@@ -624,14 +624,18 @@ async function flipCover(apply) {
   if (!c.animate || matchMedia('(prefers-reduced-motion: reduce)').matches) { apply(); return; }
   let applied = false;
   const once = () => { if (!applied) { applied = true; apply(); } };
+  // Обложка, пока играет, выдвинута вперёд (scale) — поворачиваем, не сбрасывая этого,
+  // иначе она на миг «сдувается» и прыгает обратно
+  const z = getComputedStyle(c).transform;
+  const base = z && z !== 'none' ? z + ' ' : '';
   try {
-    await c.animate([{ transform: 'perspective(900px) rotateY(0)', filter: 'brightness(1)' },
-      { transform: `perspective(900px) rotateY(${-90 * s}deg)`, filter: 'brightness(.55)' }],
+    await c.animate([{ transform: base + 'perspective(900px) rotateY(0)', filter: 'brightness(1)' },
+      { transform: base + `perspective(900px) rotateY(${-90 * s}deg)`, filter: 'brightness(.55)' }],
     { duration: 280, easing: 'cubic-bezier(.55,0,.9,.45)', fill: 'forwards' }).finished;
     once();
-    await c.animate([{ transform: `perspective(900px) rotateY(${90 * s}deg)`, filter: 'brightness(.55)' },
-      { transform: `perspective(900px) rotateY(${-6 * s}deg)`, filter: 'brightness(1.05)', offset: 0.75 },
-      { transform: 'perspective(900px) rotateY(0)', filter: 'brightness(1)' }],
+    await c.animate([{ transform: base + `perspective(900px) rotateY(${90 * s}deg)`, filter: 'brightness(.55)' },
+      { transform: base + `perspective(900px) rotateY(${-6 * s}deg)`, filter: 'brightness(1.05)', offset: 0.75 },
+      { transform: base + 'perspective(900px) rotateY(0)', filter: 'brightness(1)' }],
     { duration: 480, easing: 'cubic-bezier(.2,.75,.3,1)' }).finished;
   } catch (e) {
     once();

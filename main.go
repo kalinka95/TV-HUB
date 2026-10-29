@@ -25,7 +25,7 @@ import (
 )
 
 // Версию подставляет сборка на GitHub (-ldflags -X main.appVersion=…)
-var appVersion = "1.7.2"
+var appVersion = "1.7.3"
 
 //go:embed web
 var webFS embed.FS
@@ -70,7 +70,7 @@ type Settings struct {
 	VPNHidden         bool     `json:"vpnHidden,omitempty"`
 	EQ                *EQ      `json:"eq,omitempty"`          // эквалайзер (Equalizer APO)
 	OwnVPN            *OwnVPN  `json:"ownVpn,omitempty"`      // свой VPN (Xray) вместо Happ
-	MusicColors       []string `json:"musicColors,omitempty"` // свои цвета обводки и фона музыки (до 3, HEX); пусто — цвета обложки
+	SaverColors       []string `json:"saverColors,omitempty"` // свои цвета фона заставки (до 3, HEX); пусто — чёрный и синий
 }
 
 type Config struct {
@@ -752,6 +752,9 @@ func startServer() (string, error) {
 		res["ok"] = true
 		writeJSON(w, res)
 	}))
+	mux.HandleFunc("GET /api/conn", apiAuth(handleConnStatus))
+	mux.HandleFunc("POST /api/bt", apiAuth(handleBT))
+	mux.HandleFunc("POST /api/wifi", apiAuth(handleWifi))
 	mux.HandleFunc("GET /api/media/cover", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Query().Get("t") != token {
 			http.Error(w, "forbidden", 403)

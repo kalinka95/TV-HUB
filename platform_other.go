@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 )
@@ -19,6 +20,93 @@ func appDataDir() string {
 		return d
 	}
 	return filepath.Join(os.TempDir(), "tvhub-dev")
+}
+
+// ---------- Bluetooth и Wi-Fi (в режиме разработки — пример) ----------
+
+var (
+	devBTRadio = "on"
+	devBT      = []btDevice{
+		{ID: "bt1", Name: "Наушники Sony WH-1000XM4", Kind: "headphones", Paired: true, Connected: true},
+		{ID: "bt2", Name: "Колонка JBL Flip 5", Kind: "speaker", Paired: true},
+		{ID: "bt3", Name: "Xbox Wireless Controller", Kind: "gamepad", Paired: true},
+	}
+	devWifi = []wifiNet{
+		{SSID: "Дом 5G", Bars: 4, Secure: true, Connected: true},
+		{SSID: "Keenetic-2041", Bars: 3, Secure: true},
+		{SSID: "MosMetro_Free", Bars: 1},
+		{SSID: "TP-Link_7A31", Bars: 2, Secure: true},
+	}
+)
+
+func connStatus() map[string]any {
+	var paired []btDevice
+	for _, d := range devBT {
+		if d.Paired {
+			paired = append(paired, d)
+		}
+	}
+	var cur *wifiNet
+	for i := range devWifi {
+		if devWifi[i].Connected {
+			cur = &devWifi[i]
+		}
+	}
+	if devBTRadio != "on" {
+		paired = nil
+	}
+	return map[string]any{"bt": map[string]any{"radio": devBTRadio, "devices": paired}, "wifi": map[string]any{"adapter": true, "current": cur}}
+}
+
+func btAction(action, id string, on bool) (map[string]any, error) {
+	log.Printf("bt %s %s %v", action, id, on)
+	switch action {
+	case "scan":
+		time.Sleep(3 * time.Second)
+		if !slices.ContainsFunc(devBT, func(d btDevice) bool { return d.ID == "bt4" }) {
+			devBT = append(devBT, btDevice{ID: "bt4", Name: "AirPods Pro", Kind: "headphones"}, btDevice{ID: "bt5", Name: "Galaxy S23", Kind: "phone"})
+		}
+		return map[string]any{"devices": devBT}, nil
+	case "radio":
+		devBTRadio = map[bool]string{true: "on", false: "off"}[on]
+	case "pair", "connect", "unpair":
+		time.Sleep(1500 * time.Millisecond)
+		for i := range devBT {
+			if devBT[i].ID == id {
+				devBT[i].Paired = action != "unpair"
+				devBT[i].Connected = action != "unpair"
+			}
+		}
+	}
+	return nil, nil
+}
+
+func wifiAction(action, ssid, pass string) (map[string]any, error) {
+	log.Printf("wifi %s %s", action, ssid)
+	switch action {
+	case "scan":
+		time.Sleep(1500 * time.Millisecond)
+		return map[string]any{"networks": devWifi}, nil
+	case "connect":
+		time.Sleep(1500 * time.Millisecond)
+		for i := range devWifi {
+			n := &devWifi[i]
+			if n.SSID == ssid && n.Secure && !n.Connected && pass == "" {
+				return map[string]any{"needPassword": true}, nil
+			}
+			if n.SSID == ssid && pass == "0000" {
+				return nil, fmt.Errorf("Неверный пароль")
+			}
+		}
+		for i := range devWifi {
+			devWifi[i].Connected = devWifi[i].SSID == ssid
+		}
+	case "disconnect":
+		for i := range devWifi {
+			devWifi[i].Connected = false
+		}
+	}
+	return nil, nil
 }
 
 func signInApp(a App) error { log.Printf("signin %s", a.Target); return nil }

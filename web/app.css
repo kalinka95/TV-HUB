@@ -531,3 +531,45 @@ button, input { font: inherit; color: inherit; }
 .mc-chip::before { content: ""; position: absolute; left: 1rem; top: 50%; width: 1.6rem; height: 1.6rem; margin-top: -.8rem; border-radius: 50%;
   background: conic-gradient(var(--p1), var(--p2), var(--p3), var(--p1)); }
 .field input.bad { border-color: var(--danger); }
+
+/* ---------- Bluetooth и Wi-Fi ---------- */
+.topchip.ic { padding: .5rem .8rem; margin-left: .6rem; }
+.topchip.ic.lit { background: color-mix(in srgb, var(--accent) 45%, transparent); color: #fff; }
+.topchip.ic.off svg { opacity: .55; }
+.topchip.ic.focus { background: var(--text); color: var(--bg); }
+svg.wf .dim { opacity: .25; }
+
+.modal-box.qs-box { width: 66rem; max-width: 92vw; text-align: left; padding: 2.2rem 2.4rem 1.8rem; border-radius: 2rem;
+  background: linear-gradient(160deg, #1d2333f5, #10141cf5); border: 1px solid #ffffff1a; box-shadow: 0 3rem 8rem #000c; }
+.qs-box .modal-text { margin: 0; font-size: inherit; line-height: normal; }
+.qs-box .modal-btns { justify-content: flex-end; margin-top: 1.4rem; }
+.qs svg { stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.qs-head { display: flex; align-items: center; gap: 1.3rem; }
+.qs-hico { width: 4.4rem; height: 4.4rem; border-radius: 1.3rem; display: grid; place-items: center; flex: none; color: #fff;
+  background: linear-gradient(135deg, var(--accent), var(--accent-2)); box-shadow: 0 .8rem 2rem color-mix(in srgb, var(--accent) 40%, transparent); }
+.qs-hico svg { width: 2.4rem; height: 2.4rem; }
+.qs-htxt { display: flex; flex-direction: column; gap: .2rem; min-width: 0; }
+.qs-title { font-size: 2.1rem; font-weight: 800; letter-spacing: -.02em; }
+.qs-sub { font-size: 1.15rem; color: var(--muted); }
+.qs-switch.toggle { margin-left: auto; width: auto; gap: 1rem; padding: .6rem .7rem .6rem 1.2rem; border-radius: 2rem; background: #ffffff12; font-size: 1.2rem; font-weight: 700; }
+.qs-list { display: flex; flex-direction: column; gap: .6rem; margin-top: 1.2rem; max-height: 52vh; overflow-y: auto; padding: .4rem; margin-left: -.4rem; margin-right: -.4rem; }
+.qs-sec { font-size: 1rem; text-transform: uppercase; letter-spacing: .14em; color: var(--muted); font-weight: 700; margin: .8rem 0 .2rem .2rem; }
+.qs-line { display: flex; align-items: center; gap: .6rem; }
+.qs-row { flex: 1; min-width: 0; display: flex; align-items: center; gap: 1.1rem; padding: .85rem 1.1rem; border: 0; border-radius: 1.2rem; background: #ffffff0d; color: var(--text); text-align: left; font: inherit; }
+.qs-row.focus { transform: none; background: #ffffff24; box-shadow: 0 0 0 .25rem var(--text); }
+.qs-row.busy { opacity: .75; }
+.qs-ico { position: relative; width: 3.4rem; height: 3.4rem; border-radius: 1rem; background: #ffffff14; display: grid; place-items: center; flex: none; transition: background .3s; }
+.qs-ico svg { width: 2rem; height: 2rem; }
+.qs-ico.on { background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: #fff; }
+.qs-ico svg.qs-lock { position: absolute; right: -.35rem; bottom: -.35rem; width: 1.45rem; height: 1.45rem; padding: .2rem; border-radius: 50%; background: #2a3142; color: #ffd58a; }
+.qs-txt { display: flex; flex-direction: column; gap: .15rem; min-width: 0; flex: 1; }
+.qs-t { font-size: 1.35rem; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.qs-s { font-size: 1.02rem; color: var(--muted); display: flex; align-items: center; }
+.qs-pill { margin-left: auto; flex: none; font-size: .95rem; font-weight: 700; padding: .3rem .8rem; border-radius: 1rem; background: #2fbf7126; color: var(--ok); }
+.btn.qs-mini { flex: none; font-size: 1.05rem; padding: .7rem 1rem; }
+.btn.qs-wide { margin-top: 1rem; }
+.qs-scan { display: flex; align-items: center; gap: .2rem; color: var(--muted); font-size: 1.1rem; line-height: 1.45; padding: .8rem .6rem; }
+.qs-spin { display: inline-block; flex: none; width: 1.2rem; height: 1.2rem; margin-right: .7rem; border-radius: 50%; border: .2rem solid #ffffff33; border-top-color: var(--text); animation: spin .9s linear infinite; }
+.qs-note { color: var(--muted); font-size: 1.1rem; line-height: 1.5; margin: .8rem .2rem 0; }
+.qs-pass { margin-top: 1.2rem; display: flex; flex-direction: column; gap: .8rem; }
+#vpnBtn { white-space: nowrap; flex: none; }

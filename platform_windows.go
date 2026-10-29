@@ -316,10 +316,13 @@ func goHome() {
 	}
 	if leaveInside("") { // был открыт сайт внутри TVHub — возвращаемся на главный экран
 		curtainCancel()
+		go pauseWebApps()
+		go pauseOthers()
 		return
 	}
 	curtainCancel()
 	go pauseWebApps() // окна остаются в фоне, видео и звук — на паузе
+	go pauseOthers()  // и всё остальное, что играет (кроме Яндекс Музыки)
 	cfgMu.Lock()
 	fs := cfg.Settings.Fullscreen
 	cfgMu.Unlock()

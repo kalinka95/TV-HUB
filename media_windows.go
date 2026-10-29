@@ -114,6 +114,22 @@ while ($true) {
       $script:myPos = $v; $script:lastT = [DateTime]::UtcNow
       $c = ''
     }
+    # pauseothers:название — кнопка «Домой»: пауза всего, что играет, кроме Яндекс Музыки
+    if ($c -match '^pauseothers:(.*)$') {
+      $keep = $Matches[1]
+      foreach ($x in $mgr.GetSessions()) {
+        try {
+          if ([string]$x.SourceAppUserModelId -match '(?i)yandex') { continue }
+          if ([string]$x.GetPlaybackInfo().PlaybackStatus -ne 'Playing') { continue }
+          if ($keep) {
+            $pp = Await ($x.TryGetMediaPropertiesAsync()) ([Windows.Media.Control.GlobalSystemMediaTransportControlsSessionMediaProperties])
+            if ($pp -and [string]$pp.Title -eq $keep) { continue }
+          }
+          $null = Await ($x.TryPauseAsync()) ([bool])
+        } catch {}
+      }
+      $c = ''
+    }
     if ($s) {
       switch ($c) {
         'playpause' { $null = Await ($s.TryTogglePlayPauseAsync()) ([bool]) }
@@ -996,4 +1012,29 @@ func mediaDiag() map[string]any {
 	}
 	out["pages"] = pages
 	return out
+}
+
+// pauseOthers — кнопка «Домой»: ставим на паузу всё, что играет на компьютере (видео в Edge,
+// Twitch, плееры), кроме Яндекс Музыки. Через управление медиа Windows — как кнопка паузы
+// во всплывающем окне громкости.
+func pauseOthers() {
+	keep := ""
+	for _, t := range musicTargets() { // Яндекс Музыка на сайте видна Windows как обычный Edge — узнаём её по названию трека
+		res, err := cdpCall(t.WS, "Runtime.evaluate", map[string]any{"returnByValue": true,
+			"expression": "(navigator.mediaSession && navigator.mediaSession.metadata && navigator.mediaSession.metadata.title) || ''"})
+		if err != nil {
+			continue
+		}
+		var r struct {
+			Result struct {
+				Value string `json:"value"`
+			} `json:"result"`
+		}
+		if json.Unmarshal(res, &r) == nil && r.Result.Value != "" {
+			keep = r.Result.Value
+			break
+		}
+	}
+	ensureMediaMonitor()
+	os.WriteFile(mediaCmdFile(), []byte("pauseothers:"+strings.ReplaceAll(keep, "\n", " ")), 0o644)
 }

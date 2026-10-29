@@ -46,12 +46,55 @@ func btKind(cls, name string) string {
 		return "phone"
 	case strings.HasPrefix(c, "computer"):
 		return "computer"
-	case strings.Contains(c, "video"), strings.Contains(c, "display"):
+	case strings.HasPrefix(c, "video"), strings.Contains(c, "display"):
 		return "tv"
 	case strings.HasPrefix(c, "audiovideo"):
 		return "headphones"
 	}
 	return "other"
+}
+
+// codClass переводит класс устройства из классического поиска (Class of Device) в слова,
+// понятные btKind.
+func codClass(cod uint32) string {
+	major, minor := (cod>>8)&0x1F, (cod>>2)&0x3F
+	switch major {
+	case 1:
+		return "computer"
+	case 2:
+		return "phone"
+	case 4:
+		switch minor {
+		case 1:
+			return "audiovideo/headset"
+		case 2:
+			return "audiovideo/handsfree"
+		case 5:
+			return "audiovideo/loudspeaker"
+		case 6:
+			return "audiovideo/headphones"
+		case 7:
+			return "audiovideo/portableaudio"
+		case 8:
+			return "audiovideo/caraudio"
+		case 10:
+			return "audiovideo/hifi"
+		case 11, 12, 13, 14, 15, 16:
+			return "video"
+		}
+		return "audiovideo"
+	case 5:
+		switch {
+		case minor&0x0F == 1 || minor&0x0F == 2:
+			return "peripheral/gamepad"
+		case minor>>4 == 1:
+			return "peripheral/keyboard"
+		case minor>>4 == 2:
+			return "peripheral/pointing"
+		}
+		return "peripheral"
+	}
+	return ""
 }
 
 func handleConnStatus(w http.ResponseWriter, r *http.Request) {

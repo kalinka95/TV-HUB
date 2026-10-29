@@ -55,33 +55,122 @@ function BtList($aqs, $ms) {
   }
   , $out
 }
-# Поиск устройств — как в настройках Windows: «слушаем» эфир несколько секунд (DeviceWatcher),
-# и обычный Bluetooth, и Bluetooth LE. Имена часто приходят позже — ловим и обновления.
+# Классические функции Bluetooth Windows (bthprops): поиск с опросом эфира, сопряжение,
+# включение служб звука. Ими пользуется старое окно «Добавить устройство».
+function BtNative {
+  if ('TvhubBt' -as [type]) { return }
+  Add-Type -TypeDefinition @'
+using System; using System.Runtime.InteropServices; using System.Collections.Generic;
+public class TvhubFound { public string Name; public ulong Address; public uint Cod; public bool Connected; public bool Paired; }
+public static class TvhubBt {
+  [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+  public struct Info { public int Size; public ulong Address; public uint Class; public int Connected; public int Remembered; public int Authenticated; public long Seen1; public long Seen2; public long Used1; public long Used2; [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 248)] public string Name; }
+  [StructLayout(LayoutKind.Sequential)] struct FindParams { public int Size; }
+  [StructLayout(LayoutKind.Sequential)] struct Search { public int Size; public int Auth; public int Remembered; public int Unknown; public int Connected; public int Inquiry; public byte Timeout; public IntPtr Radio; }
+  [DllImport("bthprops.cpl")] static extern IntPtr BluetoothFindFirstRadio(ref FindParams p, out IntPtr radio);
+  [DllImport("bthprops.cpl")] static extern bool BluetoothFindRadioClose(IntPtr h);
+  [DllImport("bthprops.cpl")] static extern IntPtr BluetoothFindFirstDevice(ref Search p, ref Info info);
+  [DllImport("bthprops.cpl")] static extern bool BluetoothFindNextDevice(IntPtr h, ref Info info);
+  [DllImport("bthprops.cpl")] static extern bool BluetoothFindDeviceClose(IntPtr h);
+  [DllImport("bthprops.cpl")] static extern uint BluetoothSetServiceState(IntPtr radio, ref Info info, ref Guid service, uint flags);
+  [DllImport("bthprops.cpl")] static extern uint BluetoothAuthenticateDeviceEx(IntPtr hwnd, IntPtr radio, ref Info info, IntPtr oob, int req);
+  [DllImport("bthprops.cpl")] static extern uint BluetoothRemoveDevice(ref ulong addr);
+  [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr h);
+  static IntPtr Radio() {
+    var p = new FindParams(); p.Size = Marshal.SizeOf(typeof(FindParams));
+    IntPtr radio; IntPtr f = BluetoothFindFirstRadio(ref p, out radio);
+    if (f == IntPtr.Zero) return IntPtr.Zero;
+    BluetoothFindRadioClose(f);
+    return radio;
+  }
+  static Info NewInfo(ulong addr) { var i = new Info(); i.Size = Marshal.SizeOf(typeof(Info)); i.Address = addr; return i; }
+  // Опрос эфира: t × 1,28 секунды
+  public static TvhubFound[] Inquiry(byte t) {
+    var list = new List<TvhubFound>();
+    var p = new Search(); p.Size = Marshal.SizeOf(typeof(Search)); p.Auth = 1; p.Remembered = 1; p.Unknown = 1; p.Connected = 1; p.Inquiry = 1; p.Timeout = t;
+    var i = NewInfo(0);
+    IntPtr h = BluetoothFindFirstDevice(ref p, ref i);
+    if (h == IntPtr.Zero) return list.ToArray();
+    do {
+      list.Add(new TvhubFound { Name = i.Name, Address = i.Address, Cod = i.Class, Connected = i.Connected != 0, Paired = i.Authenticated != 0 || i.Remembered != 0 });
+      i = NewInfo(0);
+    } while (BluetoothFindNextDevice(h, ref i));
+    BluetoothFindDeviceClose(h);
+    return list.ToArray();
+  }
+  public static uint Set(ulong addr, string svc, bool on) {
+    IntPtr radio = Radio();
+    if (radio == IntPtr.Zero) return 0xFFFFFFFF;
+    var i = NewInfo(addr); var g = new Guid(svc);
+    uint r = BluetoothSetServiceState(radio, ref i, ref g, on ? 1u : 0u);
+    CloseHandle(radio);
+    return r;
+  }
+  public static uint Auth(ulong addr) {
+    IntPtr radio = Radio();
+    if (radio == IntPtr.Zero) return 0xFFFFFFFF;
+    var i = NewInfo(addr);
+    uint r = BluetoothAuthenticateDeviceEx(IntPtr.Zero, radio, ref i, IntPtr.Zero, 0);
+    CloseHandle(radio);
+    return r;
+  }
+  public static uint Remove(ulong addr) { return BluetoothRemoveDevice(ref addr); }
+}
+'@
+}
+$audioSvc = '0000110b-0000-1000-8000-00805f9b34fb', '0000111e-0000-1000-8000-00805f9b34fb' # музыка (A2DP) и гарнитура
+# Адрес устройства: «addr:…» из классического поиска или по id Windows
+function AddrOf($id) {
+  if ($id -like 'addr:*') { return [Convert]::ToUInt64($id.Substring(5), 16) }
+  $bd = Await ([Windows.Devices.Bluetooth.BluetoothDevice]::FromIdAsync($id)) ([Windows.Devices.Bluetooth.BluetoothDevice]) 5000
+  if ($bd) { $a = $bd.BluetoothAddress; $bd.Dispose(); return $a }
+  0
+}
+function DevInfo($id) {
+  if ($id -like 'addr:*') {
+    $bd = Await ([Windows.Devices.Bluetooth.BluetoothDevice]::FromBluetoothAddressAsync((AddrOf $id))) ([Windows.Devices.Bluetooth.BluetoothDevice]) 8000
+    if ($bd) { return $bd.DeviceInformation }
+    return $null
+  }
+  Await ([Windows.Devices.Enumeration.DeviceInformation]::CreateFromIdAsync($id, $props, $aepKind)) ([Windows.Devices.Enumeration.DeviceInformation])
+}
+# Поиск устройств двумя способами сразу: классический опрос эфира (так находятся обычные
+# наушники и колонки в режиме сопряжения) и современный поиск Windows (ещё и Bluetooth LE).
 function BtScan($secs) {
+  BtNative
+  $start = Get-Date
   $aqs = '(System.Devices.Aep.ProtocolId:="{e0cbf06c-cd8b-4647-bb8a-263b43f0f974}" OR System.Devices.Aep.ProtocolId:="{bb7bb05e-5972-42b5-94fc-76eaa7084d49}")'
-  $w = [Windows.Devices.Enumeration.DeviceInformation]::CreateWatcher($aqs, $props, $aepKind)
-  $seen = @{}; $n = 0
-  $null = Register-ObjectEvent -InputObject $w -EventName Added -SourceIdentifier tvAdd
-  $null = Register-ObjectEvent -InputObject $w -EventName Updated -SourceIdentifier tvUpd
-  $w.Start()
-  $end = (Get-Date).AddSeconds($secs)
-  while ((Get-Date) -lt $end) {
-    $e = Wait-Event -Timeout 1
-    if (-not $e) { continue }
+  $seen = @{}; $n = 0; $watch = $false
+  try {
+    $w = [Windows.Devices.Enumeration.DeviceInformation]::CreateWatcher($aqs, $props, $aepKind)
+    $null = Register-ObjectEvent -InputObject $w -EventName Added -SourceIdentifier tvAdd -ErrorAction Stop
+    $null = Register-ObjectEvent -InputObject $w -EventName Updated -SourceIdentifier tvUpd -ErrorAction Stop
+    $w.Start(); $watch = $true
+  } catch {}
+  # Классический опрос (~10 секунд); современный поиск тем временем копит найденное
+  $classic = @()
+  try { $classic = @([TvhubBt]::Inquiry(8)) } catch {}
+  while ($watch) {
+    $left = $secs - ((Get-Date) - $start).TotalSeconds
+    $e = Get-Event | Select-Object -First 1
+    if (-not $e) { if ($left -le 0) { break }; Start-Sleep -Milliseconds 300; continue }
     $x = $e.SourceEventArgs
     if ($e.SourceIdentifier -eq 'tvAdd' -and $x) { $seen[$x.Id] = $x; $n++ }
     elseif ($e.SourceIdentifier -eq 'tvUpd' -and $x -and $seen.ContainsKey($x.Id)) { $seen[$x.Id].Update($x) }
     Remove-Event -EventIdentifier $e.EventIdentifier
   }
-  $w.Stop()
-  Unregister-Event -SourceIdentifier tvAdd; Unregister-Event -SourceIdentifier tvUpd
-  # Запасной путь, если события не пришли: разовый запрос
-  if ($n -eq 0) {
-    $list = Await ([Windows.Devices.Enumeration.DeviceInformation]::FindAllAsync($aqs, $props, $aepKind)) ([Windows.Devices.Enumeration.DeviceInformationCollection]) 20000
+  if ($watch) { $w.Stop(); Unregister-Event -SourceIdentifier tvAdd; Unregister-Event -SourceIdentifier tvUpd }
+  if (-not $watch -or $n -eq 0) {
+    $list = Await ([Windows.Devices.Enumeration.DeviceInformation]::FindAllAsync($aqs, $props, $aepKind)) ([Windows.Devices.Enumeration.DeviceInformationCollection]) 15000
     foreach ($d in $list) { $seen[$d.Id] = $d }
   }
   $out = @(); $names = @{}
-  # Сначала обычный Bluetooth (наушники для музыки работают через него), потом LE с теми же именами не дублируем
+  foreach ($c in $classic) {
+    $name = [string]$c.Name
+    if (-not $name -or $names.ContainsKey($name)) { continue }
+    $names[$name] = 1
+    $out += @{ id = 'addr:' + $c.Address.ToString('X12'); name = $name; cod = [int64]$c.Cod; cls = ''; paired = [bool]$c.Paired; connected = [bool]$c.Connected }
+  }
   foreach ($d in ($seen.Values | Sort-Object { $_.Id -like 'BluetoothLE*' })) {
     $name = [string]$d.Name
     if (-not $name -or $names.ContainsKey($name)) { continue }
@@ -91,9 +180,9 @@ function BtScan($secs) {
       $bd = Await ([Windows.Devices.Bluetooth.BluetoothDevice]::FromIdAsync($d.Id)) ([Windows.Devices.Bluetooth.BluetoothDevice]) 3000
       if ($bd) { $cls = [string]$bd.ClassOfDevice.MajorClass + '/' + [string]$bd.ClassOfDevice.MinorClass; $bd.Dispose() }
     }
-    $out += @{ id = $d.Id; name = $name; cls = $cls; paired = [bool]$d.Properties['System.Devices.Aep.IsPaired']; connected = [bool]$d.Properties['System.Devices.Aep.IsConnected'] }
+    $out += @{ id = $d.Id; name = $name; cod = 0; cls = $cls; paired = [bool]$d.Properties['System.Devices.Aep.IsPaired']; connected = [bool]$d.Properties['System.Devices.Aep.IsConnected'] }
   }
-  @{ devices = $out; events = $n; total = $seen.Count }
+  @{ devices = $out; events = $n; total = $seen.Count; classic = $classic.Count; watch = $watch }
 }
 function Wifi {
   $null = Await ([Windows.Devices.WiFi.WiFiAdapter]::RequestAccessAsync()) ([Windows.Devices.WiFi.WiFiAccessStatus])
@@ -131,54 +220,42 @@ switch ($act) {
     Emit @{ status = [string]$res }
   }
   'pair' {
-    $d = Await ([Windows.Devices.Enumeration.DeviceInformation]::CreateFromIdAsync($id, $props, $aepKind)) ([Windows.Devices.Enumeration.DeviceInformation])
-    if (-not $d) { Emit @{ error = 'notfound' }; break }
-    $res = Await ($d.Pairing.PairAsync()) ([Windows.Devices.Enumeration.DevicePairingResult]) 60000
-    Emit @{ status = [string]$res.Status }
+    BtNative
+    $d = DevInfo $id
+    $st = ''
+    if ($d) { $res = Await ($d.Pairing.PairAsync()) ([Windows.Devices.Enumeration.DevicePairingResult]) 60000; $st = [string]$res.Status }
+    if ($st -ne 'Paired' -and $st -ne 'AlreadyPaired') {
+      # Запасной путь — классическое сопряжение Windows (если попросит код, Windows покажет окно)
+      $addr = AddrOf $id
+      if ($addr) {
+        $r = [TvhubBt]::Auth($addr)
+        if ($r -eq 0) { foreach ($svc in $audioSvc) { $null = [TvhubBt]::Set($addr, $svc, $true) }; $st = 'Paired' }
+        elseif (-not $st) { $st = 'Win32_' + $r }
+      } elseif (-not $st) { Emit @{ error = 'notfound' }; break }
+    }
+    Emit @{ status = $st }
   }
   'unpair' {
-    $d = Await ([Windows.Devices.Enumeration.DeviceInformation]::CreateFromIdAsync($id, $props, $aepKind)) ([Windows.Devices.Enumeration.DeviceInformation])
-    if (-not $d) { Emit @{ error = 'notfound' }; break }
-    $res = Await ($d.Pairing.UnpairAsync()) ([Windows.Devices.Enumeration.DeviceUnpairingResult]) 30000
-    Emit @{ status = [string]$res.Status }
+    BtNative
+    $d = DevInfo $id
+    $st = ''
+    if ($d) { $res = Await ($d.Pairing.UnpairAsync()) ([Windows.Devices.Enumeration.DeviceUnpairingResult]) 30000; $st = [string]$res.Status }
+    if ($st -ne 'Unpaired' -and $st -ne 'AlreadyUnpaired') {
+      $addr = AddrOf $id
+      if ($addr -and [TvhubBt]::Remove($addr) -eq 0) { $st = 'Unpaired' }
+    }
+    Emit @{ status = $st }
   }
   'connect' {
     # Подключить сопряжённые наушники или колонку: перезапускаем у них службы звука
     # (A2DP и гарнитуру) — Windows сразу соединяется с устройством, если оно включено
-    $bd = Await ([Windows.Devices.Bluetooth.BluetoothDevice]::FromIdAsync($id)) ([Windows.Devices.Bluetooth.BluetoothDevice]) 5000
-    if (-not $bd) { Emit @{ error = 'notfound' }; break }
-    $addr = $bd.BluetoothAddress; $bd.Dispose()
-    Add-Type -TypeDefinition @'
-using System; using System.Runtime.InteropServices;
-public static class TvhubBt {
-  [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-  public struct Info { public int Size; public ulong Address; public uint Class; public int Connected; public int Remembered; public int Authenticated; public long Seen1; public long Seen2; public long Used1; public long Used2; [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 248)] public string Name; }
-  [StructLayout(LayoutKind.Sequential)] struct FindParams { public int Size; }
-  [DllImport("bthprops.cpl")] static extern IntPtr BluetoothFindFirstRadio(ref FindParams p, out IntPtr radio);
-  [DllImport("bthprops.cpl")] static extern bool BluetoothFindRadioClose(IntPtr h);
-  [DllImport("bthprops.cpl")] static extern uint BluetoothSetServiceState(IntPtr radio, ref Info info, ref Guid service, uint flags);
-  [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr h);
-  public static uint Set(ulong addr, string svc, bool on) {
-    var p = new FindParams(); p.Size = Marshal.SizeOf(typeof(FindParams));
-    IntPtr radio; IntPtr f = BluetoothFindFirstRadio(ref p, out radio);
-    if (f == IntPtr.Zero) return 0xFFFFFFFF;
-    BluetoothFindRadioClose(f);
-    var i = new Info(); i.Size = Marshal.SizeOf(typeof(Info)); i.Address = addr;
-    var g = new Guid(svc);
-    uint r = BluetoothSetServiceState(radio, ref i, ref g, on ? 1u : 0u);
-    CloseHandle(radio);
-    return r;
-  }
-}
-'@
+    BtNative
+    $addr = AddrOf $id
+    if (-not $addr) { Emit @{ error = 'notfound' }; break }
     $codes = @()
-    foreach ($svc in '0000110b-0000-1000-8000-00805f9b34fb', '0000111e-0000-1000-8000-00805f9b34fb') {
-      $codes += [TvhubBt]::Set($addr, $svc, $false)
-    }
+    foreach ($svc in $audioSvc) { $codes += [TvhubBt]::Set($addr, $svc, $false) }
     Start-Sleep -Milliseconds 1200
-    foreach ($svc in '0000110b-0000-1000-8000-00805f9b34fb', '0000111e-0000-1000-8000-00805f9b34fb') {
-      $codes += [TvhubBt]::Set($addr, $svc, $true)
-    }
+    foreach ($svc in $audioSvc) { $codes += [TvhubBt]::Set($addr, $svc, $true) }
     Emit @{ codes = $codes }
   }
 }
@@ -260,6 +337,7 @@ func runConnPS(script string, env map[string]string, timeout time.Duration, out 
 type psDev struct {
 	ID        string `json:"id"`
 	Name      string `json:"name"`
+	Cod       uint32 `json:"cod"` // класс устройства из классического поиска
 	Cls       string `json:"cls"`
 	Paired    bool   `json:"paired"`
 	Connected bool   `json:"connected"`
@@ -268,7 +346,11 @@ type psDev struct {
 func toDevices(list []psDev) []btDevice {
 	out := []btDevice{}
 	for _, d := range list {
-		out = append(out, btDevice{ID: d.ID, Name: d.Name, Kind: btKind(d.Cls, d.Name), Paired: d.Paired, Connected: d.Connected})
+		cls := d.Cls
+		if cls == "" {
+			cls = codClass(d.Cod)
+		}
+		out = append(out, btDevice{ID: d.ID, Name: d.Name, Kind: btKind(cls, d.Name), Paired: d.Paired, Connected: d.Connected})
 	}
 	return out
 }
@@ -325,6 +407,11 @@ var btStatusText = map[string]string{
 	"Failed":                       "Не получилось. Переведите устройство в режим сопряжения и попробуйте снова",
 	"OperationAlreadyInProgress":   "Windows уже подключает устройство, подождите",
 	"RequiredHandlerNotRegistered": "Windows попросила подтверждение — посмотрите на экран компьютера",
+	"Win32_1223":                   "Сопряжение отменено",
+	"Win32_5":                      "Windows не разрешила. Включите «Режим администратора» в «Настройки» → «Общие»",
+	"Win32_1168":                   "Устройство пропало. Переведите его в режим сопряжения и нажмите «Искать ещё раз»",
+	"Win32_258":                    "Устройство не ответило вовремя. Переведите его в режим сопряжения и попробуйте снова",
+	"Win32_1244":                   "Устройство не приняло подключение. Переведите его в режим сопряжения и попробуйте снова",
 }
 
 func btAction(action, id string, on bool) (map[string]any, error) {
@@ -336,6 +423,8 @@ func btAction(action, id string, on bool) (map[string]any, error) {
 		Codes   []int64 `json:"codes"`
 		Events  int     `json:"events"` // сколько устройств нашёл поиск (для журнала)
 		Total   int     `json:"total"`
+		Classic int     `json:"classic"`
+		Watch   bool    `json:"watch"`
 	}
 	env := map[string]string{"TVHUB_ACT": action, "TVHUB_ID": id}
 	if on {
@@ -348,7 +437,7 @@ func btAction(action, id string, on bool) (map[string]any, error) {
 	if err := runConnPS(btScript, env, timeout, &r); err != nil {
 		return nil, err
 	}
-	log.Printf("bluetooth %s: %s %s %v найдено=%d/%d с именем=%d", action, r.Status, r.Error, r.Codes, r.Events, r.Total, len(r.Devices))
+	log.Printf("bluetooth %s: %s %s %v классический=%d современный=%d/%d (слушал=%v) с именем=%d", action, r.Status, r.Error, r.Codes, r.Classic, r.Events, r.Total, r.Watch, len(r.Devices))
 	switch r.Error {
 	case "noradio":
 		return nil, errors.New("на компьютере нет Bluetooth")
@@ -357,7 +446,7 @@ func btAction(action, id string, on bool) (map[string]any, error) {
 	}
 	switch action {
 	case "scan":
-		return map[string]any{"devices": toDevices(r.Devices)}, nil
+		return map[string]any{"devices": toDevices(r.Devices), "seen": r.Classic + r.Total}, nil
 	case "radio":
 		if r.Status != "Allowed" {
 			return nil, errors.New("Windows не дала переключить Bluetooth")

@@ -1092,7 +1092,7 @@ function listenEvents() {
     else if (ev.type === 'search') onSearchEvent(ev);
     else if (ev.type === 'play') onPlayEvent(ev);
     else if (ev.type === 'tv') tvNow();
-    else if (ev.type === 'appShown') hideLaunch(500);
+    else if (ev.type === 'appShown') hideLaunchWhenAway();
     else if (ev.type === 'conn') loadConn();
     else if (ev.type === 'launch' && ev.app) { if ($('launch').classList.contains('hidden')) { closeSearch(); hideSaver(); showLaunch(ev.app); } }
     else if (ev.type === 'key') {
@@ -1187,6 +1187,17 @@ function showLaunch(app) {
   setTimeout(go, 80); // окно TVHub в фоне — кадры не рисуются, показываем без перехода
   // TVHub сам сообщает, когда приложение готово и на весь экран (appShown); это — на всякий случай
   launchTimer = setTimeout(() => hideLaunch(0), 26000);
+}
+// Приложение готово. Заставку убираем, только когда окно TVHub ушло назад (приложение уже
+// на экране) — иначе на миг мелькает яркий главный экран. Не ушло за 8 секунд — убираем сами.
+function hideLaunchWhenAway() {
+  const g = launchGen;
+  if (!document.hasFocus()) { hideLaunch(300); return; }
+  let done = false;
+  const go = (d) => { if (done) return; done = true; window.removeEventListener('blur', onBlur); if (g === launchGen) hideLaunch(d); };
+  const onBlur = () => go(300);
+  window.addEventListener('blur', onBlur);
+  setTimeout(() => go(0), 8000);
 }
 function hideLaunch(delay) {
   const l = $('launch');

@@ -94,7 +94,12 @@ function renderQS(first) {
 function mergeDevs(list, pairedOnly) {
   const map = new Map(CN.devs.map((d) => [d.id, d]));
   if (pairedOnly) for (const d of CN.devs) if (d.paired) map.delete(d.id); // список сопряжённых пришёл заново
-  for (const d of list) map.set(d.id, { ...map.get(d.id), ...d });
+  for (const d of list) {
+    // Одно и то же устройство поиск может прислать под другим id — узнаём его по имени
+    const same = [...map.values()].find((x) => x.id !== d.id && x.name === d.name);
+    if (same) { if (d.connected) same.connected = true; continue; }
+    map.set(d.id, { ...map.get(d.id), ...d });
+  }
   CN.devs = [...map.values()];
 }
 
@@ -112,7 +117,7 @@ async function btScan() {
   const r = await api.post('/api/bt', { action: 'scan' }).catch((e) => ({ ok: false, error: e.message }));
   CN.scanning = false;
   CN.scanned = true;
-  if (r.ok) mergeDevs(r.devices || []);
+  if (r.ok) { mergeDevs(r.devices || []); CN.seen = r.seen || 0; }
   else toast(r.error, 5000);
   if (qsOpen() && CN.view === 'bt') renderQS();
 }
@@ -171,7 +176,9 @@ function renderBTBody(body) {
       { busy: !!busy, act: () => btDo(d, 'pair', '«' + d.name + '» подключено') }));
   }
   if (CN.scanning) list.append(el('div', 'qs-scan', '<i class="qs-spin"></i>Ищу устройства… Переведите наушники в режим сопряжения: обычно нужно зажать кнопку питания или Bluetooth, пока не замигает индикатор'));
-  else if (CN.scanned && !found.length) list.append(el('p', 'qs-note', 'Ничего не нашлось. Включите на устройстве режим сопряжения и нажмите «Искать ещё раз».'));
+  else if (CN.scanned && !found.length) list.append(el('p', 'qs-note', CN.seen
+    ? 'Новых устройств не нашлось. Включите на наушниках режим сопряжения (зажмите кнопку питания или Bluetooth, пока индикатор не замигает) и нажмите «Искать ещё раз». Если наушники подключены к телефону — выключите Bluetooth на телефоне.'
+    : 'Windows не увидела рядом ни одного Bluetooth-устройства. Проверьте, что Bluetooth на ноутбуке включён (переключатель вверху) и работает в параметрах Windows, переведите наушники в режим сопряжения и нажмите «Искать ещё раз».'));
   body.append(list);
   if (!CN.scanning) {
     const again = btn('Искать ещё раз', () => btScan(), 'qs-scan-btn', 'qs-wide');

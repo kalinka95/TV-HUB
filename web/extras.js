@@ -421,19 +421,16 @@ async function showSaver() {
   saverRGB();
   SV.timers.push(setInterval(renderSaverInfo, 10000));
   SV.timers.push(setInterval(updateSaverMusic, 3000));
-  SV.timers.push(setInterval(() => { if (!SV.colors) saverRGB(); }, 4000));
   updateSaverMusic();
 }
 
-// Фон заставки — переливающиеся пятна, как в музыке. Играет музыка — цвета обложки,
-// нет — случайные яркие цвета, которые всё время меняются.
+// Фон заставки — переливающиеся пятна, как в музыке (та же скорость), в чёрном и синем.
 function setSaverColors(c) {
   const bg = $('svBg');
   ['--mu1', '--mu2', '--mu3'].forEach((v, i) => bg.style.setProperty(v, c[i]));
 }
 function saverRGB() {
-  const h = Math.random() * 360, spread = 70 + Math.random() * 80;
-  setSaverColors([hsl(h, 0.9, 0.5), hsl(h + spread, 0.9, 0.5), hsl(h - spread, 0.9, 0.5)]);
+  setSaverColors(['#1d3fbf', '#03050c', '#0e2a8a']);
 }
 
 function renderSaverInfo() {
@@ -469,14 +466,11 @@ async function updateSaverMusic() {
         `<div class="sv-mtext"><div class="sv-mk">Сейчас играет</div><div class="sv-mt">${esc(m.title)}</div><div class="sv-ma">${esc(m.artist || '')}</div></div>`;
     }
     box.classList.remove('hidden');
-    if (u && SV.cover !== u) {
-      SV.cover = u;
-      coverColors(u).then((c) => { if (SV.on && SV.cover === u && c) { SV.colors = c; setSaverColors(c); } });
-    } else if (!u && SV.colors) { SV.colors = null; SV.cover = ''; saverRGB(); }
+    SV.cover = u;
   } else {
     box.classList.add('hidden');
     box.dataset.k = '';
-    if (SV.colors) { SV.colors = null; SV.cover = ''; saverRGB(); }
+    SV.cover = '';
   }
 }
 
@@ -501,7 +495,7 @@ function renderMusic() {
   const p = $('panel-music');
   p.innerHTML = '';
   const wrap = el('div', 'mu-wrap');
-  wrap.innerHTML = `<div class="mu-door" id="muDoor"><div class="mu-cover" id="muCover"><span class="mu-note">♪</span></div></div>
+  wrap.innerHTML = `<div class="mu-art" id="muArt"><i class="mu-glow" id="muGlow"></i><div class="mu-door" id="muDoor"><div class="mu-cover" id="muCover"><span class="mu-note">♪</span></div></div></div>
     <div class="mu-info">
       <div class="mu-kicker" id="muKicker">Музыка</div>
       <div class="mu-title" id="muTitle">Сейчас ничего не играет</div>
@@ -541,9 +535,12 @@ function renderMusic() {
   updateMusic();
   clearInterval(MU.timer);
   MU.timer = setInterval(() => {
-    if (S.screen === 'main' && S.tab === 'music') updateMusic();
+    if (S.screen === 'main' && S.tab === 'music') { updateMusic(); vizKeepAlive(); }
     else clearInterval(MU.timer);
   }, 1000);
+  p.append(Object.assign(document.createElement('canvas'), { id: 'muViz', className: 'mu-viz' }));
+  vizKeepAlive(true);
+  vizStart();
   if (!MU.tick) MU.tick = setInterval(tickMusicProgress, 500);
 }
 
@@ -671,6 +668,102 @@ async function updateMusic() {
   tickMusicProgress();
 }
 
+// ---------- Живой визуализатор ----------
+// Компьютер слушает свой звук и ~30 раз в секунду присылает полосы частот (событие viz).
+// Здесь — плавная отрисовка 60 раз в секунду: спектр внизу, обложка и фон в такт басу.
+
+const VZ = { tgt: new Array(32).fill(0), cur: new Array(32).fill(0), bass: 0, bassCur: 0, at: 0, ping: 0, raf: 0, quiet: 0 };
+
+function vizKeepAlive(now) {
+  if (!now && Date.now() - VZ.ping < 2500) return;
+  VZ.ping = Date.now();
+  api.post('/api/viz', {}).catch(() => {});
+}
+
+function onVizEvent(ev) {
+  if (Array.isArray(ev.b)) VZ.tgt = ev.b.map((v) => v / 100);
+  VZ.bass = (ev.bass || 0) / 100;
+  VZ.at = Date.now();
+}
+
+function vizOn() { return S.screen === 'main' && S.tab === 'music' && !SV.on && !!$('muViz'); }
+
+function vizStart() {
+  if (VZ.raf || !MOTION) return;
+  const frame = () => {
+    if (!vizOn()) { VZ.raf = 0; resetBeat(); return; }
+    VZ.raf = requestAnimationFrame(frame);
+    // Давно не было данных (нет звука или компьютер не отвечает) — всё плавно затихает
+    const stale = Date.now() - VZ.at > 600;
+    for (let i = 0; i < VZ.cur.length; i++) {
+      const t = stale ? 0 : VZ.tgt[i] || 0;
+      VZ.cur[i] += (t - VZ.cur[i]) * (t > VZ.cur[i] ? 0.45 : 0.18);
+    }
+    const bt = stale ? 0 : VZ.bass;
+    VZ.bassCur += (bt - VZ.bassCur) * (bt > VZ.bassCur ? 0.5 : 0.12);
+    drawViz();
+    beat(VZ.bassCur);
+  };
+  VZ.raf = requestAnimationFrame(frame);
+}
+
+// Обложка с обводкой подпрыгивает на басах, свечение вокруг неё и фон вспыхивают
+function beat(b) {
+  const k = Math.max(0, b - 0.25) / 0.75; // тихий бас не трогает картинку
+  const cov = $('muArt'), glow = $('muGlow'), bg = $('muBg');
+  if (cov) cov.style.transform = `scale(${(1 + k * 0.05).toFixed(4)})`;
+  if (glow) glow.style.opacity = (0.15 + k * 0.85).toFixed(3);
+  if (bg) bg.style.transform = `scale(${(1 + k * 0.07).toFixed(4)})`;
+}
+
+function resetBeat() {
+  ['muArt', 'muBg'].forEach((id) => { const e = $(id); if (e) e.style.transform = ''; });
+  const g = $('muGlow');
+  if (g) g.style.opacity = '';
+}
+
+function drawViz() {
+  const c = $('muViz');
+  const w = c.clientWidth, h = c.clientHeight, dpr = devicePixelRatio || 1;
+  if (c.width !== Math.round(w * dpr) || c.height !== Math.round(h * dpr)) { c.width = Math.round(w * dpr); c.height = Math.round(h * dpr); }
+  const g = c.getContext('2d');
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.clearRect(0, 0, w, h);
+  const total = VZ.cur.reduce((a, v) => a + v, 0);
+  VZ.quiet = total < 0.3 ? Math.min(1, VZ.quiet + 0.03) : Math.max(0, VZ.quiet - 0.1);
+  c.style.opacity = (1 - VZ.quiet).toFixed(2);
+  if (VZ.quiet >= 1) return;
+  // Бас в центре, высокие — к краям: 64 столбика зеркально
+  const n = VZ.cur.length, bars = n * 2, gap = w * 0.004;
+  const bw = (w - gap * (bars - 1)) / bars;
+  const base = h * 0.72; // линия, от которой растут столбики; ниже — отражение
+  const st = getComputedStyle(document.documentElement);
+  const art = $('muArt');
+  const c1 = ((art && art.style.getPropertyValue('--r1')) || st.getPropertyValue('--mu1')).trim() || '#fc3f1d';
+  const c2 = ((art && art.style.getPropertyValue('--r2')) || st.getPropertyValue('--mu2')).trim() || '#8b5cf6';
+  const grad = g.createLinearGradient(0, base - h * 0.7, 0, base);
+  grad.addColorStop(0, c2);
+  grad.addColorStop(1, c1);
+  for (let i = 0; i < bars; i++) {
+    const k = i < n ? n - 1 - i : i - n;
+    const v = Math.min(1, VZ.cur[k]);
+    const bh = Math.max(2, v * h * 0.7);
+    const x = i * (bw + gap);
+    const r = Math.min(bw / 2, 6);
+    g.globalAlpha = 0.85;
+    g.fillStyle = grad;
+    g.beginPath();
+    g.roundRect(x, base - bh, bw, bh, [r, r, 0, 0]);
+    g.fill();
+    // Отражение на «полу»
+    g.globalAlpha = 0.18;
+    g.beginPath();
+    g.roundRect(x, base + 3, bw, bh * 0.35, [0, 0, r, r]);
+    g.fill();
+  }
+  g.globalAlpha = 1;
+}
+
 // Обложка: из Windows (coverVer) или с сайта Яндекс Музыки (через свой сервер — тогда можно взять цвета)
 function coverURL(m) {
   if (!m) return '';
@@ -764,7 +857,7 @@ function setMusicColors(cols) {
 
 // Обводка обложки — в цветах обложки
 function setRing(cols) {
-  const d = $('muDoor');
+  const d = $('muArt');
   if (!d) return;
   const c = cols || MU_DEF;
   d.style.setProperty('--r1', c[0]); d.style.setProperty('--r2', c[1]); d.style.setProperty('--r3', c[2]);

@@ -337,7 +337,14 @@ button, input { font: inherit; color: inherit; }
 .nt-card .nt-sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* ---------- Музыка ---------- */
-#panel-music { justify-content: center; }
+#panel-music { justify-content: center; position: relative; }
+#panel-music .mu-wrap { position: relative; z-index: 1; }
+/* Спектр музыки внизу экрана */
+.mu-viz { position: absolute; left: 4rem; right: 4rem; bottom: 0; height: 13rem; width: calc(100% - 8rem); pointer-events: none; z-index: 0; transition: opacity .6s; }
+.mu-glow { position: absolute; inset: -1.5rem; border-radius: 3rem; z-index: -1; opacity: .15; pointer-events: none;
+  background: conic-gradient(from var(--ring-ang), var(--r1), var(--r2), var(--r3), var(--r1)); filter: blur(2.6rem); animation: ringSpin 7s linear infinite; }
+#muArt { will-change: transform; }
+#muBg { will-change: transform; }
 .mu-wrap { display: flex; gap: 4rem; align-items: center; padding: 0 6rem 6rem; }
 .mu-cover { width: 30rem; height: 30rem; border-radius: 1.6rem; flex: none; overflow: hidden; display: grid; place-items: center;
   background: linear-gradient(135deg, #fc3f1d, #8b5cf6); box-shadow: 0 2rem 5rem #000a; }
@@ -442,7 +449,8 @@ button, input { font: inherit; color: inherit; }
 }
 /* Обложка — «дверь» с цветной обводкой: при смене трека поворачивается вокруг середины */
 @property --ring-ang { syntax: '<angle>'; inherits: false; initial-value: 0deg; }
-.mu-door { position: relative; flex: none; padding: .45rem; border-radius: 2.05rem; --r1: #fc3f1d; --r2: #8b5cf6; --r3: #3b5bdb;
+.mu-art { position: relative; flex: none; --r1: #fc3f1d; --r2: #8b5cf6; --r3: #3b5bdb; }
+.mu-door { position: relative; padding: .45rem; border-radius: 2.05rem;
   background: conic-gradient(from var(--ring-ang), var(--r1), var(--r2), var(--r3), var(--r1));
   box-shadow: 0 2rem 6rem color-mix(in srgb, var(--r1) 42%, transparent), 0 2rem 5rem #0008;
   animation: ringSpin 7s linear infinite; will-change: transform; backface-visibility: hidden; }

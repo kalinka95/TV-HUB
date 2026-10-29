@@ -485,13 +485,3 @@ button, input { font: inherit; color: inherit; }
 .srch-empty { color: var(--muted); font-size: 1.2rem; padding: 1rem 0; }
 .grp-search span { color: var(--accent); font-weight: 700; }
 
-/* ---------- PIN-код ---------- */
-.pin-box { margin-top: 1.6rem; display: flex; flex-direction: column; align-items: center; gap: 1.6rem; }
-.pin-dots { display: flex; gap: 1.2rem; }
-.pin-dots i { width: 1.4rem; height: 1.4rem; border-radius: 50%; border: .2rem solid var(--muted); transition: background .15s, border-color .15s; }
-.pin-dots i.on { background: var(--text); border-color: var(--text); }
-.pin-pad { display: grid; grid-template-columns: repeat(3, 5rem); gap: .8rem; }
-.pin-k { height: 4.4rem; border-radius: 1rem; border: 0; background: var(--surface-2, #222838); font-size: 1.8rem; font-weight: 600; }
-.pin-k[data-k="pin:0"] { grid-column: 2; }
-.pin-k[data-k="pin:⌫"] { grid-column: 1; grid-row: 4; font-size: 1.4rem; }
-.pin-k.focus { background: var(--text); color: var(--bg); box-shadow: none; }

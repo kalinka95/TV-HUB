@@ -1169,17 +1169,22 @@ function show(name) {
 
 // ---------- Заставка перехода к приложению ----------
 
-let launchTimer;
+let launchTimer, launchGen = 0;
 function showLaunch(app) {
   const l = $('launch');
+  launchGen++; // прошлое «спрятать заставку», если ещё не сработало, эту заставку уже не тронет
+  clearTimeout(launchTimer);
   const c = app.color || '#4f8cff';
   l.style.setProperty('--lc', c);
   $('launchName').textContent = app.name;
   $('launchSub').textContent = app.type === 'exe' ? 'Запускаю программу' : 'Открываю';
-  l.classList.remove('hidden', 'out');
-  void l.offsetWidth;
-  l.classList.add('in');
-  clearTimeout(launchTimer);
+  l.classList.remove('hidden', 'out', 'in');
+  // Затемнение запускаем через кадр после появления — иначе браузер иногда пропускает переход
+  const g = launchGen;
+  let done = false;
+  const go = () => { if (!done && g === launchGen) { done = true; l.classList.add('in'); } };
+  requestAnimationFrame(() => requestAnimationFrame(go));
+  setTimeout(go, 80); // окно TVHub в фоне — кадры не рисуются, показываем без перехода
   // TVHub сам сообщает, когда приложение готово и на весь экран (appShown); это — на всякий случай
   launchTimer = setTimeout(() => hideLaunch(0), 26000);
 }
@@ -1187,9 +1192,12 @@ function hideLaunch(delay) {
   const l = $('launch');
   if (l.classList.contains('hidden')) return;
   clearTimeout(launchTimer);
+  const g = launchGen;
   launchTimer = setTimeout(() => {
+    if (g !== launchGen) return;
+    l.classList.remove('in');
     l.classList.add('out');
-    setTimeout(() => { l.classList.add('hidden'); l.classList.remove('in', 'out'); }, 400);
+    launchTimer = setTimeout(() => { if (g === launchGen) { l.classList.add('hidden'); l.classList.remove('out'); } }, 400);
   }, delay);
 }
 

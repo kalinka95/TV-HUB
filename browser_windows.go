@@ -655,6 +655,72 @@ func restartWebApps() {
 	}
 }
 
+// signInURL — страница входа: для сервисов Google — вход в аккаунт Google, для остальных — сам сайт.
+func signInURL(a App) string {
+	u, err := url.Parse(a.Target)
+	if err != nil {
+		return a.Target
+	}
+	h := strings.ToLower(u.Hostname())
+	google := false
+	for _, x := range []string{"youtube.com", "google.com", "google.ru"} {
+		if h == x || strings.HasSuffix(h, "."+x) {
+			google = true
+		}
+	}
+	if !google {
+		return a.Target
+	}
+	next := a.Target
+	if strings.HasSuffix(h, "youtube.com") {
+		next = "https://www.youtube.com/" // ТВ-версия без ТВ-браузера не открывается
+	}
+	return "https://accounts.google.com/ServiceLogin?" + url.Values{"continue": {next}}.Encode()
+}
+
+// signInApp открывает сервис для входа в аккаунт в обычном Edge — без порта управления TVHub
+// и без подменённого User-Agent: так Google не считает браузер «небезопасным».
+// Профиль тот же, что у сервиса, поэтому вход сохранится. При следующем открытии сервиса
+// TVHub закроет это окно и откроет сервис как обычно — уже с выполненным входом.
+func signInApp(a App) error {
+	if a.Type != "web" {
+		return errors.New("войти можно только в сайт")
+	}
+	browser := findBrowser()
+	if browser == "" {
+		return errors.New("не найден Microsoft Edge")
+	}
+	dir := profileDir(appProfile(a))
+	closeProfile(dir)
+	appWinMu.Lock()
+	delete(appWins, a.ID)
+	appWinMu.Unlock()
+	r := tvhubMonitor()
+	args := []string{
+		"--user-data-dir=" + dir,
+		"--no-first-run", "--no-default-browser-check",
+		fmt.Sprintf("--window-position=%d,%d", r.Left, r.Top), fmt.Sprintf("--window-size=%d,%d", r.Right-r.Left, r.Bottom-r.Top),
+		"--start-maximized",
+		signInURL(a),
+	}
+	if bypassVPN(a) {
+		args = append(args, "--no-proxy-server")
+	}
+	c := exec.Command(browser, args...)
+	if err := c.Start(); err != nil {
+		return err
+	}
+	go c.Wait()
+	go func() {
+		time.Sleep(2500 * time.Millisecond)
+		if h := windowOfProfile(dir, ""); h != 0 {
+			focusWindow(h)
+		}
+		curtainDown(0)
+	}()
+	return nil
+}
+
 // openPlainWebApp открывает сайт в Edge как обычный браузер — без порта управления (его замечают,
 // например, при входе в аккаунт Twitch). Окно сразу открывается на весь экран телевизора, за заставкой.
 func openPlainWebApp(a App, browser, dir string) error {

@@ -581,6 +581,16 @@ function appMenu(app) {
       toast(app.plain ? 'Сайт будет открываться как обычный Edge — если он не пускал в аккаунт, попробуйте снова' : 'Сайт снова открывается как раньше', 5000);
     } });
   }
+  // Google и некоторые сайты не пускают в аккаунт браузер, которым управляет программа.
+  // Вход делаем в обычном Edge с тем же профилем — потом сервис открывается уже с входом.
+  if (app.type === 'web') {
+    items.push({ label: 'Войти в аккаунт', act: async () => {
+      if (!app.inEdge && !app.userAgent) { app.inEdge = true; await saveCfg(); } // вход сохраняется только в Edge
+      const r = await api.post('/api/launch', { id: app.id, signin: true }).catch((e) => ({ ok: false, error: e.message }));
+      if (!r.ok) { toast('Не удалось открыть: ' + r.error, 5000); return; }
+      toast('Войдите в аккаунт в открывшемся окне, затем нажмите «Домой». Сервис откроется уже с входом', 9000);
+    } });
+  }
   modal(`«${app.name}»`, [
     ...items,
     { label: 'Удалить', cls: 'danger', act: () => {

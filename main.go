@@ -25,7 +25,7 @@ import (
 )
 
 // Версию подставляет сборка на GitHub (-ldflags -X main.appVersion=…)
-var appVersion = "1.6.6"
+var appVersion = "1.6.7"
 
 //go:embed web
 var webFS embed.FS
@@ -639,8 +639,9 @@ func displayChannels(ch []Channel) []Channel {
 
 func handleLaunch(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		ID    string
-		Fresh bool // открыть сайт с главной страницы, а не там, где остановились
+		ID     string
+		Fresh  bool // открыть сайт с главной страницы, а не там, где остановились
+		SignIn bool // войти в аккаунт: обычный Edge, которому Google доверяет
 	}
 	json.NewDecoder(r.Body).Decode(&req)
 	if req.Fresh {
@@ -663,6 +664,14 @@ func handleLaunch(w http.ResponseWriter, r *http.Request) {
 	}
 	if app == nil {
 		http.Error(w, "приложение не найдено", 404)
+		return
+	}
+	if req.SignIn {
+		if err := signInApp(*app); err != nil {
+			writeJSON(w, map[string]any{"ok": false, "error": err.Error()})
+			return
+		}
+		writeJSON(w, map[string]any{"ok": true})
 		return
 	}
 	if err := launchApp(*app); err != nil {

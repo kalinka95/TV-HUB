@@ -9,9 +9,9 @@ func TestBtKind(t *testing.T) {
 		name string
 		want string
 	}{
-		{0x240418, "", "WH-1000XM4", "headphones"},  // аудио, наушники
-		{0x240404, "", "Гарнитура", "headphones"},   // аудио, гарнитура
-		{0x240414, "", "JBL Flip 5", "speaker"},     // аудио, колонка
+		{0x240418, "", "WH-1000XM4", "headphones"}, // аудио, наушники
+		{0x240404, "", "Гарнитура", "headphones"},  // аудио, гарнитура
+		{0x240414, "", "JBL Flip 5", "speaker"},    // аудио, колонка
 		{0x200400, "", "Что-то звуковое", "headphones"},
 		{0x002508, "", "Xbox Controller", "gamepad"}, // периферия, геймпад
 		{0x5a020c, "", "Galaxy S23", "phone"},

@@ -60,3 +60,22 @@ func TestSubscriptionNamesWithSpaces(t *testing.T) {
 		t.Fatalf("%+v", servers)
 	}
 }
+
+func TestUnwrapAppLink(t *testing.T) {
+	for in, want := range map[string]string{
+		"happ://add/https://sub.example.com/abc123":                        "https://sub.example.com/abc123",
+		"happ://add/https%3A%2F%2Fsub.example.com%2Fabc%3Fx%3D1":           "https://sub.example.com/abc?x=1",
+		"v2raytun://import/https://sub.example.com/u/1#Мой VPN":            "https://sub.example.com/u/1",
+		"sing-box://import-remote-profile?url=https%3A%2F%2Fs.example.com": "https://s.example.com",
+	} {
+		if got, ok := unwrapAppLink(in); !ok || got != want {
+			t.Errorf("%s → %q", in, got)
+		}
+	}
+	if _, ok := unwrapAppLink("happ://crypt2/AbCdEf"); ok {
+		t.Error("зашифрованная ссылка не должна разворачиваться")
+	}
+	if _, ok := unwrapAppLink("vless://id@h:443#x"); ok {
+		t.Error("ссылка на сервер — не обёртка")
+	}
+}

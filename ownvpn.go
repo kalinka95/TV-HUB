@@ -361,10 +361,42 @@ func ownVPNStatus() map[string]any {
 }
 
 // fetchSubscription скачивает подписку (или берёт ссылки, вставленные напрямую).
+// unwrapAppLink достаёт обычную подписку из ссылок для приложений: happ://add/https://…,
+// v2raytun://import/…, hiddify://import/…, streisand://import/…, sing-box://import-remote-profile?url=…
+func unwrapAppLink(s string) (string, bool) {
+	low := strings.ToLower(s)
+	if !strings.Contains(low, "://") || strings.HasPrefix(low, "http://") || strings.HasPrefix(low, "https://") {
+		return s, false
+	}
+	if strings.HasPrefix(low, "happ://crypt") {
+		return s, false // зашифрованная — открыть может только Happ
+	}
+	rest := s[strings.Index(s, "://")+3:]
+	if u, err := url.Parse(s); err == nil {
+		if v := u.Query().Get("url"); strings.HasPrefix(v, "http") {
+			return v, true
+		}
+	}
+	for _, cand := range []string{rest, func() string { d, _ := url.PathUnescape(rest); return d }()} {
+		if i := strings.Index(strings.ToLower(cand), "http"); i >= 0 {
+			v := cand[i:]
+			if j := strings.Index(v, "#"); j >= 0 {
+				v = v[:j]
+			}
+			if strings.HasPrefix(v, "http://") || strings.HasPrefix(v, "https://") {
+				return v, true
+			}
+		}
+	}
+	return s, false
+}
+
 func fetchSubscription(sub string) ([]string, error) {
 	sub = strings.TrimSpace(sub)
-	if strings.HasPrefix(sub, "happ://") {
-		return nil, errors.New("это зашифрованная ссылка Happ — её может открыть только Happ. Попросите у VPN-сервиса обычную ссылку-подписку (https://…)")
+	if u, ok := unwrapAppLink(sub); ok {
+		sub = u
+	} else if strings.HasPrefix(strings.ToLower(sub), "happ://") {
+		return nil, errors.New("это зашифрованная ссылка Happ — её может открыть только Happ. Попросите у VPN-сервиса обычную ссылку-подписку (https://…): обычно она есть в боте или личном кабинете рядом с кнопкой «Добавить в Happ»")
 	}
 	body := sub
 	if strings.HasPrefix(sub, "http://") || strings.HasPrefix(sub, "https://") {

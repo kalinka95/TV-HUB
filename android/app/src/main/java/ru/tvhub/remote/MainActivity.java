@@ -1,13 +1,16 @@
 package ru.tvhub.remote;
 
+import android.Manifest;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.text.InputType;
 import android.util.TypedValue;
@@ -42,6 +45,7 @@ import com.google.mlkit.vision.codescanner.GmsBarcodeScanning;
 /**
  * Пульт TVHub: открывает страницу пульта, которую показывает TVHub на компьютере.
  * Сам интерфейс пульта приходит с компьютера, поэтому обновляется вместе с TVHub.
+ * Музыку компьютера показывает в шторке телефона (MusicService).
  */
 public class MainActivity extends Activity {
 
@@ -68,6 +72,15 @@ public class MainActivity extends Activity {
         if (url.isEmpty()) showSetup(null);
         else openRemote(url);
         checkUpdate(false);
+        askNotifications();
+    }
+
+    /** Android 13+ спрашивает разрешение на уведомления — без него музыки в шторке не будет. Спрашиваем один раз. */
+    private void askNotifications() {
+        if (Build.VERSION.SDK_INT < 33 || prefs.getBoolean("askedNotify", false)) return;
+        if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) return;
+        prefs.edit().putBoolean("askedNotify", true).apply();
+        requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 1);
     }
 
     // ---------- Новые версии приложения ----------
@@ -233,6 +246,7 @@ public class MainActivity extends Activity {
         }
         prefs.edit().putString("url", u.toString()).apply();
         openRemote(u.toString());
+        MusicService.start(this);
     }
 
     // ---------- Пульт ----------
@@ -287,6 +301,7 @@ public class MainActivity extends Activity {
     protected void onResume() {
         super.onResume();
         if (web != null) web.onResume();
+        MusicService.start(this); // следим, не играет ли музыка на компьютере (для шторки)
     }
 
     @Override
@@ -320,6 +335,18 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public void setVolumeKeys(boolean on) {
             prefs.edit().putBoolean("volumeKeys", on).apply();
+        }
+
+        @JavascriptInterface
+        public boolean musicNotify() {
+            return prefs.getBoolean("musicNotify", true);
+        }
+
+        @JavascriptInterface
+        public void setMusicNotify(boolean on) {
+            prefs.edit().putBoolean("musicNotify", on).apply();
+            if (on) MusicService.start(MainActivity.this);
+            else MusicService.stop(MainActivity.this);
         }
     }
 }

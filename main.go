@@ -25,7 +25,7 @@ import (
 )
 
 // Версию подставляет сборка на GitHub (-ldflags -X main.appVersion=…)
-var appVersion = "1.3.8"
+var appVersion = "1.3.9"
 
 //go:embed web
 var webFS embed.FS
@@ -702,16 +702,19 @@ func startServer() (string, error) {
 		writeJSON(w, map[string]any{"media": st, "available": ok, "music": musicAppInfo(), "startInfo": lastWaveInfo()})
 	}))
 	mux.HandleFunc("POST /api/media", apiAuth(func(w http.ResponseWriter, r *http.Request) {
-		var req struct{ Action string }
+		var req mediaReq
 		json.NewDecoder(io.LimitReader(r.Body, 1024)).Decode(&req)
-		info := ""
+		res := map[string]any{}
 		if st, _ := getMedia(); req.Action == "playpause" && st.Title == "" {
-			info = startMusic()
-		} else if err := mediaAction(req.Action); err != nil {
+			res["info"] = startMusic()
+		} else if out, err := doMediaCommand(req); err != nil {
 			writeJSON(w, map[string]any{"ok": false, "error": err.Error()})
 			return
+		} else if out != nil {
+			res = out
 		}
-		writeJSON(w, map[string]any{"ok": true, "info": info})
+		res["ok"] = true
+		writeJSON(w, res)
 	}))
 	mux.HandleFunc("GET /api/media/cover", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Query().Get("t") != token {

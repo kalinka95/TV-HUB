@@ -307,10 +307,11 @@ func startRemoteServer() {
 		writeJSON(w, map[string]any{"media": st, "available": ok, "startInfo": lastWaveInfo()})
 	}))
 	mux.HandleFunc("POST /r/api/media", remoteAuth(func(w http.ResponseWriter, r *http.Request) {
-		var req struct{ Action string }
+		var req mediaReq
 		json.NewDecoder(io.LimitReader(r.Body, 1024)).Decode(&req)
 		var err error
 		info := ""
+		res := map[string]any{}
 		switch req.Action {
 		case "show":
 			showScreen("music")
@@ -323,13 +324,17 @@ func startRemoteServer() {
 				err = mediaAction(req.Action)
 			}
 		default:
-			err = mediaAction(req.Action)
+			var out map[string]any
+			if out, err = doMediaCommand(req); out != nil {
+				res = out
+			}
 		}
 		if err != nil {
 			writeJSON(w, map[string]any{"ok": false, "error": err.Error()})
 			return
 		}
-		writeJSON(w, map[string]any{"ok": true, "info": info})
+		res["ok"], res["info"] = true, info
+		writeJSON(w, res)
 	}))
 	// Картинку телефон грузит тегом <img>, поэтому ключ — в адресе
 	mux.HandleFunc("GET /r/api/media/cover", func(w http.ResponseWriter, r *http.Request) {

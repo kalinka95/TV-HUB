@@ -141,8 +141,17 @@ header { display: flex; align-items: center; gap: 10px; height: 44px; flex: none
 .mu-artist { font-size: 15px; color: #c7cede; }
 .mu-info { font-size: 13px; color: #ffd58a; background: #ffffff12; border-radius: 12px; padding: 8px 12px; line-height: 1.4; user-select: text; -webkit-user-select: text; }
 .mu-prog { display: flex; align-items: center; gap: 10px; width: 100%; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; margin-top: 6px; }
-.mu-bar { flex: 1; height: 4px; border-radius: 2px; background: #ffffff26; overflow: hidden; }
-.mu-bar i { display: block; height: 100%; width: 0; background: var(--text); }
+.mu-seek { flex: 1; padding: 14px 0; touch-action: none; cursor: pointer; }
+.mu-bar { position: relative; height: 4px; border-radius: 2px; background: #ffffff26; transition: height .15s; }
+.mu-bar i { display: block; height: 100%; width: 0; border-radius: 2px; background: var(--text); }
+.mu-bar b { position: absolute; top: 50%; width: 14px; height: 14px; margin: -7px 0 0 -7px; border-radius: 50%; background: var(--text); left: 0; transform: scale(0); transition: transform .15s; }
+.mu-seek.drag .mu-bar { height: 6px; }
+.mu-seek.drag .mu-bar b, .mu-seek:active .mu-bar b { transform: scale(1); }
+.mu-prog.drag #muPos { color: var(--text); font-weight: 700; }
+.mu-b.mu-like { width: 52px; height: 52px; background: transparent; }
+.mu-b.mu-like svg { width: 26px; height: 26px; }
+.mu-b.mu-like.liked svg { fill: #ff4d6d; stroke: #ff4d6d; }
+.mu-b.mu-like.nolike { opacity: .4; }
 .mu-ctrls { display: flex; gap: 18px; align-items: center; margin: 10px 0 6px; }
 .mu-b { width: 64px; height: 64px; border-radius: 50%; background: #ffffff1f; display: grid; place-items: center; transition: transform .08s; }
 .mu-b svg { width: 28px; height: 28px; stroke: var(--text); fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
@@ -194,6 +203,7 @@ header { display: flex; align-items: center; gap: 10px; height: 44px; flex: none
   <div class="sheet-box">
     <div class="sheet-title">Пульт TVHub</div>
     <button class="key" id="volToggle"></button>
+    <button class="key hidden" id="musicToggle"></button>
     <button class="key" id="rescanBtn">Подключиться к другому компьютеру</button>
     <button class="key hidden" id="appUpdBtn">Проверить обновление приложения</button>
     <button class="key" id="sheetClose">Закрыть</button>
@@ -299,11 +309,12 @@ header { display: flex; align-items: center; gap: 10px; height: 44px; flex: none
     <div class="mu-title" id="muTitle"></div>
     <div class="mu-artist" id="muArtist"></div>
     <div class="mu-info hidden" id="muInfo"></div>
-    <div class="mu-prog hidden" id="muProg"><span id="muPos">0:00</span><div class="mu-bar"><i id="muBar"></i></div><span id="muDur">0:00</span></div>
+    <div class="mu-prog hidden" id="muProg"><span id="muPos">0:00</span><div class="mu-seek" id="muSeek"><div class="mu-bar"><i id="muBar"></i><b id="muKnob"></b></div></div><span id="muDur">0:00</span></div>
     <div class="mu-ctrls">
       <button class="mu-b" data-mu="prev" aria-label="Предыдущий"><svg viewBox="0 0 24 24"><path d="M6 5v14"/><path d="M19 5l-10 7 10 7z"/></svg></button>
       <button class="mu-b mu-play" data-mu="playpause" aria-label="Пауза"><svg viewBox="0 0 24 24"><path id="muPlayIco" d="M7 5l12 7-12 7z"/></svg></button>
       <button class="mu-b" data-mu="next" aria-label="Следующий"><svg viewBox="0 0 24 24"><path d="M18 5v14"/><path d="M5 5l10 7-10 7z"/></svg></button>
+      <button class="mu-b mu-like nolike" id="muLike" aria-label="Мне нравится"><svg viewBox="0 0 24 24"><path d="M12 20.5l-1.3-1.2C5.6 14.7 2.5 11.9 2.5 8.4 2.5 5.6 4.7 3.5 7.4 3.5c1.6 0 3.4.8 4.6 2.2 1.2-1.4 3-2.2 4.6-2.2 2.7 0 4.9 2.1 4.9 4.9 0 3.5-3.1 6.3-8.2 10.9z"/></svg></button>
     </div>
     <div class="mu-vol">
       <button class="key" data-mu="voldown">🔉 Тише</button>
@@ -522,16 +533,67 @@ async function loadMusic() {
     cov.dataset.src = ''; cov.innerHTML = '<span>♪</span>'; $('muBgImg').classList.remove('on');
   }
   $('muPlayIco').setAttribute('d', playing ? 'M8 5v14M16 5v14' : 'M7 5l12 7-12 7z');
+  showLike(m.title ? m.liked : undefined);
   tickMusic();
 }
 function tickMusic() {
   const m = muSt;
   if (!m || !m.dur || m.dur < 1) { $('muProg').classList.add('hidden'); return; }
-  const pos = Math.min(m.dur, m.pos + (m.status === 'Playing' ? (Date.now() - muAt) / 1000 : 0));
+  const pos = muDrag !== null ? muDrag : Math.min(m.dur, m.pos + (m.status === 'Playing' ? (Date.now() - muAt) / 1000 : 0));
   $('muProg').classList.remove('hidden');
   $('muPos').textContent = fmtT(pos); $('muDur').textContent = fmtT(m.dur);
-  $('muBar').style.width = (pos / m.dur * 100).toFixed(1) + '%';
+  const pct = (pos / m.dur * 100).toFixed(1) + '%';
+  $('muBar').style.width = pct;
+  $('muKnob').style.left = pct;
 }
+// Перемотка: тянем полосу пальцем или нажимаем в нужное место
+let muDrag = null;
+const seekBox = $('muSeek');
+const seekAt = (e) => {
+  const r = seekBox.getBoundingClientRect();
+  return Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * (muSt ? muSt.dur : 0);
+};
+seekBox.addEventListener('pointerdown', (e) => {
+  if (!muSt || !muSt.dur) return;
+  seekBox.setPointerCapture(e.pointerId);
+  muDrag = seekAt(e);
+  seekBox.classList.add('drag'); $('muProg').classList.add('drag');
+  tickMusic();
+});
+seekBox.addEventListener('pointermove', (e) => { if (muDrag !== null) { muDrag = seekAt(e); tickMusic(); } });
+seekBox.addEventListener('pointerup', async (e) => {
+  if (muDrag === null) return;
+  const pos = seekAt(e);
+  seekBox.classList.remove('drag'); $('muProg').classList.remove('drag');
+  buzz();
+  try {
+    const r = await fetch('/r/api/media', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Remote': KEY }, body: JSON.stringify({ action: 'seek', pos }) });
+    const d = await r.json();
+    if (!d.ok) toast(d.error || 'Не получилось перемотать');
+    else if (muSt) { muSt.pos = pos; muAt = Date.now(); }
+  } catch (err) { toast('Нет связи с компьютером'); }
+  muDrag = null;
+  tickMusic();
+});
+seekBox.addEventListener('pointercancel', () => { muDrag = null; seekBox.classList.remove('drag'); $('muProg').classList.remove('drag'); tickMusic(); });
+// «Мне нравится»
+function showLike(v) {
+  const b = $('muLike');
+  b.classList.toggle('liked', v === true);
+  b.classList.toggle('nolike', typeof v !== 'boolean');
+}
+$('muLike').addEventListener('click', async () => {
+  buzz();
+  if (!(muSt && muSt.title)) { toast('Сейчас ничего не играет'); return; }
+  try {
+    const r = await fetch('/r/api/media', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Remote': KEY }, body: JSON.stringify({ action: 'like' }) });
+    const d = await r.json();
+    if (!d.ok) { toast(d.error || 'Не получилось'); return; }
+    muSt.liked = d.liked;
+    showLike(d.liked);
+    toast(d.liked ? 'Добавлено в «Мне нравится»' : 'Убрано из «Мне нравится»');
+  } catch (e) { toast('Нет связи с компьютером'); }
+});
 document.querySelectorAll('[data-mu]').forEach((b) => b.addEventListener('click', async () => {
   buzz();
   const action = b.dataset.mu;
@@ -762,6 +824,13 @@ if (window.TVHubApp) {
   m.addEventListener('click', () => { label(); sh.classList.remove('hidden'); });
   vt.addEventListener('click', () => { TVHubApp.setVolumeKeys(!TVHubApp.volumeKeys()); label(); buzz(); });
   $('rescanBtn').addEventListener('click', () => TVHubApp.rescan());
+  if (TVHubApp.musicNotify) {
+    const mt = $('musicToggle');
+    const mlabel = () => { mt.textContent = 'Музыка в шторке телефона: ' + (TVHubApp.musicNotify() ? 'показывать' : 'не показывать'); };
+    mt.classList.remove('hidden');
+    m.addEventListener('click', mlabel);
+    mt.addEventListener('click', () => { TVHubApp.setMusicNotify(!TVHubApp.musicNotify()); mlabel(); buzz(); });
+  }
   if (TVHubApp.checkUpdate) {
     const ub = $('appUpdBtn');
     ub.classList.remove('hidden');

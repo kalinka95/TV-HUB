@@ -555,7 +555,7 @@ function renderMusic() {
       <div class="mu-kicker" id="muKicker">Музыка</div>
       <div class="mu-title" id="muTitle">Сейчас ничего не играет</div>
       <div class="mu-artist" id="muArtist">Откройте Яндекс Музыку и включите «Мою волну» или любимый плейлист</div>
-      <div class="mu-prog hidden" id="muProg"><span id="muPos">0:00</span><div class="pbar"><i id="muBar"></i></div><span id="muDur">0:00</span></div>
+      <div class="mu-prog hidden" id="muProg"><span id="muPos">0:00</span><div class="pbar f mu-seek" id="muSeek" data-k="mu:seek"><i id="muBar"></i></div><span id="muDur">0:00</span></div>
       <div class="mu-ctrls" id="muCtrls"></div>
       <div class="mu-actions" id="muActions"></div>
       <p class="mu-hint">Кнопки управляют тем, что сейчас играет на компьютере: Яндекс Музыкой, YouTube или любым плеером. Музыка играет и дальше, когда вы возвращаетесь в TVHub кнопкой «Домой».</p>
@@ -574,8 +574,15 @@ function renderMusic() {
   mk('prev', '<path d="M6 5v14"/><path d="M19 5l-10 7 10 7z"/>', 'Предыдущий трек', () => mediaCmd('prev'));
   mk('play', '<path d="M7 5l12 7-12 7z" id="muPlayIco"/>', 'Пауза / продолжить', () => mediaCmd('playpause')).classList.add('mu-play');
   mk('next', '<path d="M18 5v14"/><path d="M5 5l10 7-10 7z"/>', 'Следующий трек', () => mediaCmd('next'));
+  const like = mk('like', '<path d="M12 20.5l-1.3-1.2C5.6 14.7 2.5 11.9 2.5 8.4 2.5 5.6 4.7 3.5 7.4 3.5c1.6 0 3.4.8 4.6 2.2 1.2-1.4 3-2.2 4.6-2.2 2.7 0 4.9 2.1 4.9 4.9 0 3.5-3.1 6.3-8.2 10.9z"/>', 'Мне нравится', toggleLike);
+  like.id = 'muLike';
   mk('vdown', '<path d="M4 9h4l5-4v14l-5-4H4z"/><path d="M17 12h4"/>', 'Тише', () => mediaCmd('voldown'));
   mk('vup', '<path d="M4 9h4l5-4v14l-5-4H4z"/><path d="M17 12h4M19 10v4"/>', 'Громче', () => mediaCmd('volup'));
+  // Перемотка как в Яндекс Музыке: на полосе прогресса ← → — на 10 секунд, если держать — быстрее
+  const seek = wrap.querySelector('#muSeek');
+  seek._lr = (dir) => musicScrub(dir === 'right' ? 1 : -1);
+  seek._act = () => musicScrubApply();
+  seek._info = { kicker: 'Музыка', title: 'Перемотка', sub: '← → — перемотать на 10 секунд. Удерживайте кнопку, чтобы перематывать быстрее' };
   const acts = wrap.querySelector('#muActions');
   const open = btn('Открыть Яндекс Музыку', () => launch(musicApp()), 'mu:open', 'primary');
   open._info = { kicker: 'Музыка', title: 'Яндекс Музыка', sub: 'Откроется приложение Яндекс Музыки или сайт music.yandex.ru. Вернуться — «Домой», музыка продолжит играть.' };
@@ -589,12 +596,68 @@ function renderMusic() {
   if (!MU.tick) MU.tick = setInterval(tickMusicProgress, 500);
 }
 
-async function mediaCmd(action) {
+async function mediaCmd(action, extra) {
+  let r = null;
   try {
-    const r = await api.post('/api/media', { action });
-    if (r.info) toast(r.info, 6000);
+    r = await api.post('/api/media', { action, ...extra });
+    if (r.error) toast(r.error, 5000);
+    else if (r.info) toast(r.info, 6000);
   } catch (e) { toast('Ошибка: ' + e.message); }
   setTimeout(updateMusic, 400);
+  return r && r.ok ? r : null;
+}
+
+// Перемотка: нажатия копятся, а команда уходит, когда кнопку отпустили
+function musicScrub(dir) {
+  const m = MU.st;
+  if (!m || !m.dur) return;
+  const now = Date.now();
+  const sc = MU.scrub && now - MU.scrub.last < 1500 ? MU.scrub : { pos: curMusicPos(), n: 0 };
+  sc.n = now - (sc.last || 0) < 350 ? sc.n + 1 : 0;
+  sc.last = now;
+  const step = sc.n < 5 ? 10 : sc.n < 15 ? 20 : 40;
+  sc.pos = Math.max(0, Math.min(m.dur - 1, sc.pos + dir * step));
+  MU.scrub = sc;
+  clearTimeout(MU.scrubTimer);
+  MU.scrubTimer = setTimeout(musicScrubApply, 600);
+  tickMusicProgress();
+}
+
+async function musicScrubApply() {
+  clearTimeout(MU.scrubTimer);
+  const sc = MU.scrub;
+  if (!sc) return;
+  const r = await mediaCmd('seek', { pos: sc.pos });
+  if (MU.scrub === sc) {
+    if (r && MU.st) { MU.st.pos = sc.pos; MU.at = Date.now(); }
+    MU.scrub = null;
+  }
+  tickMusicProgress();
+}
+
+async function toggleLike() {
+  const r = await mediaCmd('like');
+  if (!r) return;
+  if (MU.st) MU.st.liked = r.liked;
+  showLike(MU.st);
+  toast(r.liked ? 'Добавлено в «Мне нравится»' : 'Убрано из «Мне нравится»', 3000);
+}
+
+function showLike(m) {
+  const b = $('muLike');
+  if (!b) return;
+  const known = !!m && typeof m.liked === 'boolean';
+  b.classList.toggle('liked', known && m.liked);
+  b.classList.toggle('nolike', !known);
+  b._info.title = known && m.liked ? 'В «Мне нравится» · OK — убрать' : 'Мне нравится';
+  b._info.sub = known ? 'Трек добавится в «Мне нравится» в Яндекс Музыке' : 'Работает с Яндекс Музыкой, открытой из TVHub';
+  if (cur === b) setHero(b._info);
+}
+
+function curMusicPos() {
+  const m = MU.st;
+  if (!m) return 0;
+  return Math.min(m.dur || 0, m.pos + (m.status === 'Playing' ? (Date.now() - MU.at) / 1000 : 0));
 }
 
 async function updateMusic() {
@@ -602,6 +665,7 @@ async function updateMusic() {
   try { r = await api.get('/api/media'); } catch (e) { return; }
   MU.st = r.media; MU.at = Date.now();
   const m = r.media;
+  showLike(m && m.title ? m : null);
   const title = $('muTitle');
   if (!title) return;
   const playing = m && m.status === 'Playing';
@@ -617,7 +681,7 @@ async function updateMusic() {
       const im = new Image();
       im.onload = () => { if (cover.dataset.u === u) { cover.innerHTML = ''; cover.append(im); } };
       im.src = u;
-      coverColors(u).then(setMusicColors);
+      coverColors(u).then((cols) => { if (cover.dataset.u === u) setMusicColors(cols); });
     } else if (!u && cover.dataset.u) { cover.dataset.u = ''; cover.innerHTML = '<span class="mu-note">♪</span>'; setMusicColors(null); }
   } else {
     $('muKicker').textContent = r.available === false ? 'Музыка' : 'Сейчас ничего не играет';
@@ -637,8 +701,9 @@ function coverURL(m) {
   return '';
 }
 
-// Главные цвета обложки: насыщенные и разные по оттенку. Работает с любой обложкой —
-// у тёмных и серых обложек цвета берутся из того, что есть, и делаются ярче.
+// Главные цвета обложки — те, что занимают на ней больше всего места. Цвета не придумываем:
+// оттенки остаются как на обложке, только слишком тёмные и слишком светлые подтягиваем,
+// чтобы фон было видно и текст на нём читался.
 function rgbToHsl(r, g, b) {
   r /= 255; g /= 255; b /= 255;
   const mx = Math.max(r, g, b), mn = Math.min(r, g, b), l = (mx + mn) / 2;
@@ -650,56 +715,61 @@ function rgbToHsl(r, g, b) {
 const hsl = (h, s, l) => `hsl(${Math.round(((h % 360) + 360) % 360)}, ${Math.round(s * 100)}%, ${Math.round(l * 100)}%)`;
 
 function paletteFromPixels(d) {
-  const buckets = new Map();
-  let tw = 0, ts = 0, tl = 0, hx = 0, hy = 0;
+  // Группы похожих цветов: серые — по яркости, цветные — по оттенку и яркости.
+  // Цвет группы — среднее настоящих пикселей (а не усреднённый оттенок).
+  const bins = new Map();
   for (let i = 0; i < d.length; i += 4) {
     if (d[i + 3] < 128) continue;
-    const [h, s, l] = rgbToHsl(d[i], d[i + 1], d[i + 2]);
-    tl += l; tw++;
-    if (l < 0.06 || l > 0.97 || s < 0.06) continue; // почти чёрный, белый или серый
-    const w = (0.2 + s * 2) * (1 - Math.abs(l - 0.5));
-    ts += s * w;
-    hx += Math.cos(h * Math.PI / 180) * w; hy += Math.sin(h * Math.PI / 180) * w;
-    const key = Math.round(h / 24) % 15;
-    const e = buckets.get(key) || { w: 0, x: 0, y: 0, s: 0, l: 0 };
-    e.w += w; e.x += Math.cos(h * Math.PI / 180) * w; e.y += Math.sin(h * Math.PI / 180) * w; e.s += s * w; e.l += l * w;
-    buckets.set(key, e);
+    const r = d[i], g = d[i + 1], b = d[i + 2];
+    const [h, s, l] = rgbToHsl(r, g, b);
+    const grey = s < 0.15 || l < 0.08 || l > 0.94;
+    const key = grey ? 'g' + Math.min(4, Math.floor(l * 5)) : Math.floor(h / 20) + ':' + Math.min(2, Math.floor(l * 3));
+    // Площадь важнее всего; цветным пикселям — небольшая прибавка, чтобы яркий акцент
+    // на большой серой обложке тоже попал в палитру, но не перекрасил весь фон
+    const w = grey ? 1 : 1 + s * 0.8;
+    const e = bins.get(key) || { w: 0, n: 0, r: 0, g: 0, b: 0, grey };
+    e.w += w; e.n++; e.r += r; e.g += g; e.b += b;
+    bins.set(key, e);
   }
-  const avgL = tw ? tl / tw : 0.5;
-  // Совсем бесцветная обложка — спокойные холодные тона с оттенком её яркости
-  if (!buckets.size) {
-    const l = 0.34 + avgL * 0.2;
-    return [hsl(220, 0.35, l), hsl(255, 0.3, l - 0.06), hsl(195, 0.32, l + 0.04)];
-  }
-  const list = [...buckets.values()].sort((a, b) => b.w - a.w).map((e) => ({
-    h: (Math.atan2(e.y, e.x) * 180 / Math.PI + 360) % 360, s: e.s / e.w, l: e.l / e.w, w: e.w,
-  }));
-  // Берём до трёх цветов, заметно разных по оттенку
+  if (!bins.size) return null;
+  const list = [...bins.values()].map((e) => ({ w: e.w, grey: e.grey, r: e.r / e.n, g: e.g / e.n, b: e.b / e.n })).sort((a, b) => b.w - a.w);
+  const total = list.reduce((a, c) => a + c.w, 0);
+  const dist = (a, b) => Math.hypot(a.r - b.r, (a.g - b.g) * 1.2, a.b - b.b);
+  // До трёх заметно разных цветов; совсем мелкие пятна (меньше 3% обложки) не берём
   const picked = [];
   for (const c of list) {
-    if (picked.every((p) => Math.min(Math.abs(p.h - c.h), 360 - Math.abs(p.h - c.h)) > 28)) picked.push(c);
+    if (picked.length && c.w < total * 0.03) break;
+    if (picked.every((p) => dist(p, c) > 55)) picked.push(c);
     if (picked.length === 3) break;
   }
-  // Не хватает разных цветов — добавляем соседние оттенки главного
-  const base = picked[0];
-  const shifts = [38, -38, 70];
-  for (let i = 0; picked.length < 3; i++) {
-    picked.push({ h: base.h + shifts[i], s: base.s, l: base.l + (i ? -0.08 : 0.06) });
-  }
-  // Делаем цвета сочными: насыщенность и яркость подтягиваем к хорошему диапазону
-  return picked.map((c) => hsl(c.h, Math.min(0.95, Math.max(0.55, c.s * 1.25)), Math.min(0.62, Math.max(0.42, c.l))));
+  const cols = picked.map((c) => {
+    const [h, s, l] = rgbToHsl(c.r, c.g, c.b);
+    return { h, s, l };
+  });
+  // Обложка почти одного цвета — берём тот же оттенок светлее и темнее, а не соседние оттенки
+  const base = cols[0];
+  for (let i = 0; cols.length < 3; i++) cols.push({ h: base.h, s: base.s, l: base.l + (i ? -0.14 : 0.14) });
+  return cols.map((c) => {
+    const s = c.s < 0.12 ? c.s : Math.min(0.85, c.s * 1.1);
+    return hsl(c.h, s, Math.min(0.6, Math.max(0.2, c.l)));
+  });
 }
 
+const coverPalettes = new Map();
 function coverColors(src) {
+  if (coverPalettes.has(src)) return Promise.resolve(coverPalettes.get(src));
   return new Promise((resolve) => {
     const img = new Image();
     img.onload = () => {
       try {
         const c = document.createElement('canvas');
-        c.width = c.height = 48;
+        c.width = c.height = 64;
         const g = c.getContext('2d', { willReadFrequently: true });
-        g.drawImage(img, 0, 0, 48, 48);
-        resolve(paletteFromPixels(g.getImageData(0, 0, 48, 48).data));
+        g.drawImage(img, 0, 0, 64, 64);
+        const p = paletteFromPixels(g.getImageData(0, 0, 64, 64).data);
+        if (coverPalettes.size > 50) coverPalettes.clear();
+        coverPalettes.set(src, p);
+        resolve(p);
       } catch (e) { resolve(null); }
     };
     img.onerror = () => resolve(null);
@@ -726,9 +796,9 @@ function tickMusicProgress() {
   const m = MU.st, box = $('muProg');
   if (!box) return;
   if (!m || !m.dur || m.dur < 1) { box.classList.add('hidden'); return; }
-  let pos = m.pos + (m.status === 'Playing' ? (Date.now() - MU.at) / 1000 : 0);
-  pos = Math.min(pos, m.dur);
+  const pos = MU.scrub ? MU.scrub.pos : curMusicPos();
   box.classList.remove('hidden');
+  box.classList.toggle('scrub', !!MU.scrub);
   $('muPos').textContent = fmtDur(pos);
   $('muDur').textContent = fmtDur(m.dur);
   $('muBar').style.width = ((pos / m.dur) * 100).toFixed(1) + '%';
@@ -805,7 +875,7 @@ function renderExtraSettings(inner) {
   sv.append(el('p', 'note', 'Если долго ничего не нажимать, появятся часы, погода и красивая тёмная картинка дня. Любая кнопка возвращает обратно.'));
   const seg = el('div', 'seg');
   const curM = c.settings.saverMinutes || 0;
-  for (const [v, l] of [[-1, 'Выкл'], [5, '5 мин'], [10, '10 мин'], [15, '15 мин'], [30, '30 мин']]) {
+  for (const [v, l] of [[-1, 'Выкл'], [1, '1 мин'], [5, '5 мин'], [10, '10 мин'], [15, '15 мин'], [30, '30 мин']]) {
     const sel = v === curM || (v === 10 && curM === 0);
     seg.append(btn(l, async () => { c.settings.saverMinutes = v; await saveCfg(); keepFocus(renderSettings); }, 'saver:' + v, sel ? 'sel' : ''));
   }

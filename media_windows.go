@@ -42,6 +42,7 @@ $lastKey = ''
 $myPos = 0; $rawLast = -1; $lastT = $null
 $coverTries = 0
 $haveCover = $false
+$prevCover = ''; $curCover = ''
 $cmdFile = $env:TVHUB_MEDIA_CMD
 function Emit {
   $o = @{ ok = $true }
@@ -55,7 +56,10 @@ function Emit {
     $o.app = [string]$s.SourceAppUserModelId
     $o.dur = $tl.EndTime.TotalSeconds
     $key = "$($p.Title)|$($p.Artist)"
-    if ($key -ne $script:lastKey) { $script:lastKey = $key; $script:coverTries = 0; $script:haveCover = $false; $o.cover = ''; $script:myPos = 0; $script:rawLast = -1 }
+    if ($key -ne $script:lastKey) {
+      $script:lastKey = $key; $script:coverTries = 0; $script:haveCover = $false; $o.cover = ''; $script:myPos = 0; $script:rawLast = -1
+      if ($script:curCover) { $script:prevCover = $script:curCover }; $script:curCover = ''
+    }
     # Позиция трека. Многие плееры (и Яндекс Музыка) сообщают её только в начале трека,
     # поэтому досчитываем сами: от времени, когда плеер её сообщил, и своим таймером.
     $t = [DateTime]::UtcNow
@@ -72,8 +76,9 @@ function Emit {
     }
     $o.pos = $script:myPos
     if ($o.dur -gt 0 -and $o.pos -gt $o.dur) { $o.pos = $o.dur }
-    # Обложка часто приходит позже названия — пробуем несколько раз
-    if (-not $script:haveCover -and $script:coverTries -lt 8 -and $p.Thumbnail) {
+    # Обложка часто приходит позже названия — пробуем несколько раз.
+    # Первые секунды после смены трека плеер может ещё отдавать обложку прошлого трека — её не берём.
+    if (-not $script:haveCover -and $script:coverTries -lt 10 -and $p.Thumbnail) {
       $script:coverTries++
       try {
         $rs = Await ($p.Thumbnail.OpenReadAsync()) ([Windows.Storage.Streams.IRandomAccessStreamWithContentType])
@@ -83,8 +88,11 @@ function Emit {
           $bytes = New-Object byte[] ([int]$rs.Size)
           $reader.ReadBytes($bytes)
           $reader.Dispose(); $rs.Dispose()
-          $o.cover = [Convert]::ToBase64String($bytes)
-          $script:haveCover = $true
+          $b64 = [Convert]::ToBase64String($bytes)
+          if ($b64 -ne $script:prevCover -or $script:coverTries -ge 6) {
+            $o.cover = $b64; $script:curCover = $b64
+            $script:haveCover = $true
+          }
         }
       } catch {}
     }
@@ -94,11 +102,18 @@ function Emit {
 }
 $tick = 99
 while ($true) {
-  # Команды от TVHub (пауза, следующий, предыдущий) приходят через файл
+  # Команды от TVHub (пауза, следующий, предыдущий, перемотка) приходят через файл
   if ($cmdFile -and (Test-Path $cmdFile)) {
     $c = ''
     try { $c = ([IO.File]::ReadAllText($cmdFile)).Trim(); Remove-Item $cmdFile -Force } catch {}
     $s = $mgr.GetCurrentSession()
+    # seek:секунды — перемотать; setpos:секунды — TVHub уже перемотал сам, только запоминаем позицию
+    if ($c -match '^(seek|setpos):([0-9.]+)$') {
+      $v = [double]::Parse($Matches[2], [Globalization.CultureInfo]::InvariantCulture)
+      if ($Matches[1] -eq 'seek' -and $s) { $null = Await ($s.TryChangePlaybackPositionAsync([long]($v * 10000000))) ([bool]) }
+      $script:myPos = $v; $script:lastT = [DateTime]::UtcNow
+      $c = ''
+    }
     if ($s) {
       switch ($c) {
         'playpause' { $null = Await ($s.TryTogglePlayPauseAsync()) ([bool]) }
@@ -126,6 +141,7 @@ type mediaState struct {
 	Dur      float64 `json:"dur"`
 	CoverVer string  `json:"coverVer,omitempty"`
 	CoverURL string  `json:"coverUrl,omitempty"` // обложка по ссылке (с сайта Яндекс Музыки)
+	Liked    *bool   `json:"liked,omitempty"`    // трек в «Мне нравится» (nil — TVHub не видит страницу Яндекс Музыки)
 	At       int64   `json:"at"`
 }
 
@@ -136,6 +152,8 @@ var (
 	mediaCmd     *exec.Cmd
 	mediaLastReq time.Time
 	mediaFails   int
+	seekAt       time.Time // после перемотки пару секунд не верим старой позиции от PowerShell
+	seekPos      float64
 )
 
 func ensureMediaMonitor() {
@@ -193,6 +211,12 @@ func ensureMediaMonitor() {
 			media = st.mediaState
 			media.CoverVer = cover
 			media.At = time.Now().Unix()
+			if since := time.Since(seekAt); since < 1500*time.Millisecond && media.Title != "" {
+				media.Pos = seekPos
+				if media.Status == "Playing" {
+					media.Pos += since.Seconds()
+				}
+			}
 			idle := time.Since(mediaLastReq) > 2*time.Minute
 			mediaMu.Unlock()
 			if idle { // никто не смотрит на экран музыки — выключаем слежение
@@ -217,7 +241,10 @@ func getMedia() (mediaState, bool) {
 	mediaMu.Lock()
 	st, ok := media, mediaFails <= 5
 	mediaMu.Unlock()
-	defer func() { fillCoverFallback(&st) }()
+	defer func() {
+		fillCoverFallback(&st)
+		st.Liked = likeState(st)
+	}()
 	// Windows не сообщает, что играет, или не отдаёт обложку — спросим сайт Яндекс Музыки
 	if st.Title == "" || (st.CoverVer == "" && strings.Contains(strings.ToLower(st.App), "edge")) {
 		if w, found := webMusicInfo(); found && (st.Title == "" || strings.EqualFold(w.Title, st.Title)) {
@@ -239,6 +266,151 @@ func mediaCoverBytes() []byte {
 }
 
 func mediaCmdFile() string { return filepath.Join(dataDir, "media-cmd.txt") }
+
+// mediaSeek перематывает трек на pos секунд. Яндекс Музыку (сайт или приложение, которое
+// открыл TVHub) перематываем прямо на странице, остальное — через управление медиа Windows.
+func mediaSeek(pos float64) error {
+	ensureMediaMonitor()
+	mediaMu.Lock()
+	st, running := media, mediaCmd != nil
+	mediaMu.Unlock()
+	if st.Title == "" {
+		if w, ok := webMusicInfo(); ok {
+			st = w
+		}
+	}
+	if st.Title == "" {
+		return errors.New("сейчас ничего не играет")
+	}
+	if st.Dur > 0 && pos > st.Dur-1 {
+		pos = st.Dur - 1
+	}
+	pos = max(pos, 0)
+	cmd := "seek:"
+	if seekMusicPage(st.Title, pos) {
+		cmd = "setpos:"
+	} else if !running {
+		return errors.New("этот плеер не даёт перематывать")
+	}
+	mediaMu.Lock()
+	seekAt, seekPos = time.Now(), pos
+	if media.Title != "" {
+		media.Pos = pos
+	}
+	mediaMu.Unlock()
+	if running {
+		os.WriteFile(mediaCmdFile(), []byte(fmt.Sprintf("%s%.1f", cmd, pos)), 0o644)
+	}
+	return nil
+}
+
+func seekMusicPage(title string, pos float64) bool {
+	js := fmt.Sprintf(`((pos, title) => {
+		const m = navigator.mediaSession && navigator.mediaSession.metadata;
+		if (!m || m.title !== title) return false;
+		const a = [...document.querySelectorAll('audio,video')].find((x) => isFinite(x.duration) && x.duration > 0);
+		if (!a) return false;
+		a.currentTime = Math.min(pos, a.duration - 0.5);
+		return true;
+	})(%f, %q)`, pos, title)
+	for _, t := range musicTargets() {
+		res, err := cdpCall(t.WS, "Runtime.evaluate", map[string]any{"expression": js, "returnByValue": true})
+		if err == nil && strings.Contains(string(res), `"value":true`) {
+			return true
+		}
+	}
+	return false
+}
+
+// likeJS(нажать, название) находит в плеере Яндекс Музыки кнопку «Мне нравится» и
+// возвращает, отмечен ли трек: 'on', 'off' или 'none' (кнопки или трека нет).
+const likeJS = `((click, title) => {
+  const m = navigator.mediaSession && navigator.mediaSession.metadata;
+  if (!m || (title && m.title !== title)) return 'none';
+  const vis = (e) => { const r = e.getBoundingClientRect(); return r.width > 4 && r.height > 4 && getComputedStyle(e).visibility !== 'hidden'; };
+  const label = (b) => ((b.getAttribute('aria-label') || '') + ' ' + (b.title || '') + ' ' + (b.getAttribute('data-test-id') || '')).toLowerCase();
+  const inBar = (e) => !!e.closest('footer,[class*=layerBar],[class*=layerbar],[class*=PlayerBar],[class*=playerBar],[class*=player-controls],[data-test-id*=PLAYERBAR],[class*=FullscreenPlayer],[class*=fullscreenPlayer]');
+  const b = [...document.querySelectorAll('button,[role=button]')].find((b) => vis(b) && inBar(b)
+    && /like|нрав|лайк|избран|favorite/.test(label(b)) && !/dislike|не нрав|дизлайк/.test(label(b)));
+  if (!b) return 'none';
+  const cls = String(b.className && b.className.baseVal !== undefined ? b.className.baseVal : b.className);
+  const on = b.getAttribute('aria-pressed') === 'true' || b.getAttribute('aria-checked') === 'true'
+    || /_on\b|(^|\s)(active|liked|checked)\b|isLiked|_liked|_active/i.test(cls)
+    || /удалить|убрать|remove|unlike/.test(label(b));
+  if (click) b.click();
+  return on ? 'on' : 'off';
+})`
+
+func evalLike(t cdpTarget, click bool, title string) string {
+	res, err := cdpCall(t.WS, "Runtime.evaluate", map[string]any{"expression": fmt.Sprintf("%s(%v, %q)", likeJS, click, title), "returnByValue": true, "userGesture": true})
+	if err != nil {
+		return "none"
+	}
+	var r struct {
+		Result struct {
+			Value string `json:"value"`
+		} `json:"result"`
+	}
+	json.Unmarshal(res, &r)
+	if r.Result.Value == "" {
+		return "none"
+	}
+	return r.Result.Value
+}
+
+var (
+	likeMu    sync.Mutex
+	likeTitle string
+	likeAt    time.Time
+	likeVal   *bool
+)
+
+// likeState — отмечен ли играющий трек в Яндекс Музыке (ответ живёт пару секунд,
+// чтобы частые запросы экрана и телефона не дёргали страницу).
+func likeState(st mediaState) *bool {
+	if st.Title == "" {
+		return nil
+	}
+	likeMu.Lock()
+	defer likeMu.Unlock()
+	if likeTitle == st.Title && time.Since(likeAt) < 2*time.Second {
+		return likeVal
+	}
+	likeTitle, likeAt, likeVal = st.Title, time.Now(), nil
+	for _, t := range musicTargets() {
+		if v := evalLike(t, false, st.Title); v != "none" {
+			on := v == "on"
+			likeVal = &on
+			break
+		}
+	}
+	return likeVal
+}
+
+// mediaLike нажимает «Мне нравится» в Яндекс Музыке и возвращает, отмечен ли трек теперь.
+func mediaLike() (bool, error) {
+	st, _ := getMedia()
+	if st.Title == "" {
+		return false, errors.New("сейчас ничего не играет")
+	}
+	for _, t := range musicTargets() {
+		before := evalLike(t, true, st.Title)
+		if before == "none" {
+			continue
+		}
+		on := before != "on"
+		// Страница обновляет кнопку не сразу — проверяем, что получилось
+		time.Sleep(600 * time.Millisecond)
+		if after := evalLike(t, false, st.Title); after != "none" && after != before {
+			on = after == "on"
+		}
+		likeMu.Lock()
+		likeTitle, likeAt, likeVal = st.Title, time.Now(), &on
+		likeMu.Unlock()
+		return on, nil
+	}
+	return false, errors.New("«Мне нравится» работает только с Яндекс Музыкой, открытой из TVHub")
+}
 
 // mediaAction: пауза и треки — через системное управление медиа Windows (как кнопки
 // во всплывающем окне громкости), громкость — клавишами громкости.

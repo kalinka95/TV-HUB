@@ -123,23 +123,36 @@ type mediaState struct {
 	Dur      float64 `json:"dur"`
 	CoverVer string  `json:"coverVer,omitempty"`
 	CoverURL string  `json:"coverUrl,omitempty"`
+	Liked    *bool   `json:"liked,omitempty"`
 	At       int64   `json:"at"`
 }
 
 var devMedia = mediaState{OK: true, Title: "Звезда по имени Солнце", Artist: "Кино", Album: "Звезда по имени Солнце", Status: "Playing", App: "Yandex.Music", Pos: 42, Dur: 225,
 	CoverURL: os.Getenv("TVHUB_DEV_COVER")}
-var devMediaStart = time.Now()
+var (
+	devMediaStart = time.Now()
+	devMediaPos   = 42.0
+	devLiked      = false
+)
 
 func getMedia() (mediaState, bool) {
 	m := devMedia
 	if m.Status == "Playing" {
-		m.Pos = float64(int(time.Since(devMediaStart).Seconds()+42) % 225)
+		m.Pos = float64(int(time.Since(devMediaStart).Seconds()+devMediaPos) % 225)
 	}
+	liked := devLiked
+	m.Liked = &liked
 	m.At = time.Now().Unix()
 	fillCoverFallback(&m)
 	return m, true
 }
 func mediaCoverBytes() []byte { return nil }
+func mediaSeek(pos float64) error {
+	log.Printf("media seek %.1f", pos)
+	devMediaStart, devMediaPos = time.Now(), max(0, min(pos, 224))
+	return nil
+}
+func mediaLike() (bool, error) { devLiked = !devLiked; return devLiked, nil }
 func mediaAction(a string) error {
 	log.Printf("media %s", a)
 	if a == "playpause" {

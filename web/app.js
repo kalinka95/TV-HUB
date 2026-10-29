@@ -1486,6 +1486,13 @@ function onKey(e) {
     }
   }
 
+  // Элемент сам решает, что делать со стрелками влево/вправо (полоса перемотки музыки)
+  if ((k === 'left' || k === 'right') && cur && cur._lr && $('modal').classList.contains('hidden')) {
+    e.preventDefault();
+    cur._lr(k);
+    return;
+  }
+
   switch (k) {
     case 'up': case 'down': case 'left': case 'right': e.preventDefault(); move(k); break;
     case 'ok': case 'space': e.preventDefault(); activate(); break;

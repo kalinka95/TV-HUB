@@ -128,6 +128,8 @@ header { display: flex; align-items: center; gap: 10px; height: 44px; flex: none
 /* Музыка */
 #v-music { overflow-y: auto; }
 .mu { position: relative; isolation: isolate; display: flex; flex-direction: column; align-items: center; text-align: center; gap: 8px; padding: 6px 0 12px; }
+.mu-shade { position: relative; z-index: 2; display: grid; gap: 10px; background: #161a23e6; border-radius: 14px; padding: 12px 14px; margin-bottom: 12px; font-size: 13.5px; line-height: 1.45; color: var(--muted); text-align: left; }
+.mu-shade .key { height: 44px; font-size: 14px; }
 .mu-bgimg { position: fixed; inset: -20%; background-size: cover; background-position: center; filter: blur(60px) saturate(1.4) brightness(.55); opacity: 0; transition: opacity 1s, background-image 1s; z-index: 0; pointer-events: none; }
 .mu > :not(.mu-bgimg) { position: relative; z-index: 1; }
 .mu-bgimg.on { opacity: .9; }
@@ -303,6 +305,7 @@ header { display: flex; align-items: center; gap: 10px; height: 44px; flex: none
 <!-- Музыка -->
 <section class="view hidden" id="v-music">
   <div class="mu">
+    <div class="mu-shade hidden" id="muShade"><span id="muShadeText"></span><button class="key primary" id="muShadeBtn"></button></div>
     <div class="mu-bgimg" id="muBgImg"></div>
     <div class="mu-cover" id="muCover"><span>♪</span></div>
     <div class="mu-state" id="muState">Загружаю…</div>
@@ -611,6 +614,32 @@ document.querySelectorAll('[data-mu]').forEach((b) => b.addEventListener('click'
 setInterval(() => { if (document.visibilityState === 'visible' && !$('v-music').classList.contains('hidden')) loadMusic(); }, 1000);
 setInterval(() => { if (!$('v-music').classList.contains('hidden')) tickMusic(); }, 500);
 document.querySelector('#tabs [data-v="music"]').addEventListener('click', loadMusic);
+
+// Подсказка про музыку в шторке телефона: старое приложение или выключены уведомления
+function checkShade() {
+  const box = $('muShade');
+  if (!box || !window.TVHubApp) return;
+  const app = window.TVHubApp;
+  let text = '', label = '', act = null;
+  if (!app.musicNotify) {
+    text = 'Чтобы музыка компьютера была в шторке и на экране блокировки, обновите приложение «Пульт TVHub».';
+    if (app.checkUpdate) { label = 'Проверить обновление'; act = () => app.checkUpdate(); }
+  } else if (app.musicNotify() && app.notifyAllowed && !app.notifyAllowed()) {
+    text = 'Музыка не появится в шторке: приложению запрещены уведомления.';
+    label = 'Разрешить уведомления'; act = () => app.allowNotify();
+  }
+  box.classList.toggle('hidden', !text);
+  if (!text) return;
+  $('muShadeText').textContent = text;
+  const b = $('muShadeBtn');
+  b.classList.toggle('hidden', !act);
+  b.textContent = label;
+  b.onclick = () => { buzz(); act && act(); setTimeout(checkShade, 3000); };
+}
+document.querySelector('#tabs [data-v="music"]').addEventListener('click', checkShade);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) checkShade(); });
+checkShade();
+
 if (!$('v-music').classList.contains('hidden')) loadMusic();
 
 // ----- Открытые окна -----

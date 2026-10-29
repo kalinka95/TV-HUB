@@ -3,6 +3,7 @@ package ru.tvhub.remote;
 import android.Manifest;
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.app.NotificationManager;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
@@ -12,6 +13,7 @@ import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.provider.Settings;
 import android.text.InputType;
 import android.util.TypedValue;
 import android.view.Gravity;
@@ -73,6 +75,29 @@ public class MainActivity extends Activity {
         else openRemote(url);
         checkUpdate(false);
         askNotifications();
+    }
+
+    /** Спросить разрешение ещё раз, а если Android больше не показывает вопрос — открыть настройки уведомлений. */
+    private void askNotificationsAgain() {
+        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+                && (!prefs.getBoolean("askedNotify", false) || shouldShowRequestPermissionRationale(Manifest.permission.POST_NOTIFICATIONS))) {
+            prefs.edit().putBoolean("askedNotify", true).apply();
+            requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 1);
+            return;
+        }
+        Intent i = new Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, getPackageName());
+        try {
+            startActivity(i);
+        } catch (Exception e) {
+            startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + getPackageName())));
+        }
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int code, String[] perms, int[] res) {
+        super.onRequestPermissionsResult(code, perms, res);
+        MusicService.stop(this); // перезапускаем, чтобы карточка появилась в шторке сразу
+        MusicService.start(this);
     }
 
     /** Android 13+ спрашивает разрешение на уведомления — без него музыки в шторке не будет. Спрашиваем один раз. */
@@ -345,8 +370,25 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public void setMusicNotify(boolean on) {
             prefs.edit().putBoolean("musicNotify", on).apply();
-            if (on) MusicService.start(MainActivity.this);
-            else MusicService.stop(MainActivity.this);
+            if (on) {
+                runOnUiThread(() -> {
+                    if (!notifyAllowed()) askNotificationsAgain();
+                    MusicService.start(MainActivity.this);
+                });
+            } else MusicService.stop(MainActivity.this);
+        }
+
+        /** Разрешены ли приложению уведомления (без них музыки в шторке не будет). */
+        @JavascriptInterface
+        public boolean notifyAllowed() {
+            NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+            if (nm != null && !nm.areNotificationsEnabled()) return false;
+            return Build.VERSION.SDK_INT < 33 || checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED;
+        }
+
+        @JavascriptInterface
+        public void allowNotify() {
+            runOnUiThread(MainActivity.this::askNotificationsAgain);
         }
     }
 }

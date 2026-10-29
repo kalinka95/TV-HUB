@@ -367,11 +367,6 @@ button, input { font: inherit; color: inherit; }
 /* ---------- Заставка ---------- */
 .saver { position: absolute; inset: 0; z-index: 30; background: #000; opacity: 0; transition: opacity .5s; cursor: none; overflow: hidden; }
 .saver.show { opacity: 1; }
-.sv-img { position: absolute; inset: -2%; background-size: cover; background-position: center; opacity: 0; transition: opacity 2.5s ease;
-  filter: brightness(.5) saturate(.9); }
-.sv-img.on { opacity: 1; }
-.sv-img.kb { animation: kenburns 60s linear forwards; }
-@keyframes kenburns { from { transform: scale(1); } to { transform: scale(1.08) translate(-1%, -1%); } }
 .sv-shade { position: absolute; inset: 0; background: linear-gradient(0deg, #000d 0%, #0006 40%, transparent 70%), linear-gradient(90deg, #0008 0%, transparent 55%); }
 .sv-info { position: absolute; left: 6rem; bottom: 5.5rem; transition: transform 2s ease; }
 .sv-clock { font-size: 12rem; font-weight: 200; letter-spacing: -0.04em; line-height: .9; font-variant-numeric: tabular-nums; text-shadow: 0 .4rem 2rem #0008; }
@@ -384,13 +379,17 @@ button, input { font: inherit; color: inherit; }
 .sv-fc { justify-content: flex-start; margin-top: 1.6rem; }
 .sv-fc .fc-day { background: #ffffff14; backdrop-filter: blur(10px); min-width: 7.5rem; padding: .8rem 1rem; }
 .sv-fc .fc-ico { width: 2.4rem; height: 2.4rem; margin: .4rem auto; }
-.sv-music { position: absolute; top: 4rem; right: 5rem; display: flex; gap: 1.2rem; align-items: center; background: #ffffff14; backdrop-filter: blur(12px);
-  border-radius: 1.2rem; padding: 1rem 1.4rem 1rem 1rem; max-width: 36rem; }
-.sv-music img { width: 5rem; height: 5rem; border-radius: .7rem; object-fit: cover; }
-.sv-music .sv-note { width: 5rem; height: 5rem; border-radius: .7rem; display: grid; place-items: center; background: linear-gradient(135deg, #fc3f1d, #8b5cf6); font-size: 2.4rem; }
-.sv-mt { font-size: 1.3rem; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 26rem; }
-.sv-ma { font-size: 1.1rem; color: #d5dae4; margin-top: .2rem; }
-.sv-caption { position: absolute; right: 4rem; bottom: 3rem; font-size: 1rem; color: #ffffff80; max-width: 40rem; text-align: right; }
+.sv-music { position: absolute; top: 4.5rem; right: 5rem; display: flex; gap: 1.8rem; align-items: center; background: #0000004d; backdrop-filter: blur(14px);
+  padding: 1.2rem 2.2rem 1.2rem 1.2rem; border-radius: 1.6rem; box-shadow: 0 1.5rem 4rem #0006; transition: transform 2s ease; }
+.sv-music img, .sv-music .sv-note { width: 11rem; height: 11rem; border-radius: 1rem; object-fit: cover; box-shadow: 0 1rem 3rem #0008; flex: none; }
+.sv-music .sv-note { display: grid; place-items: center; background: linear-gradient(135deg, #fc3f1d, #8b5cf6); font-size: 4.4rem; }
+.sv-mk { font-size: 1rem; letter-spacing: .14em; text-transform: uppercase; color: #ffffffa6; font-weight: 700; }
+.sv-mt { font-size: 2rem; font-weight: 800; margin-top: .4rem; max-width: 30rem; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.15; }
+.sv-ma { font-size: 1.35rem; color: #e3e7ef; margin-top: .4rem; max-width: 30rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Фон заставки: те же переливы, что в музыке, только темнее, чтобы читались часы */
+.saver .sv-bg { inset: -20%; }
+.saver .sv-bg.on { opacity: .8; }
+.saver .sv-bg i { transition: background 3.5s ease; }
 
 .up-notes { text-align: left; margin-top: 1.4rem; background: var(--surface-2); border-radius: 1rem; padding: 1.2rem 1.6rem; font-size: 1.2rem; line-height: 1.5; }
 .up-notes ul { margin: .6rem 0 0; padding-left: 1.6rem; }

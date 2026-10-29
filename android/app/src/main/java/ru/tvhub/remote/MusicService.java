@@ -36,14 +36,16 @@ import java.util.concurrent.Executors;
 
 /**
  * Музыка компьютера в шторке телефона: что играет в Яндекс Музыке (или в любом другом окне),
- * обложка, пауза, треки, перемотка и «Мне нравится». Работает, пока на компьютере что-то
- * играет или стоит на паузе; когда музыки нет минуту — уведомление убирается само.
+ * обложка, пауза, треки, перемотка и «Мне нравится». Пока музыки нет, в шторке остаётся
+ * тихая карточка с кнопкой «плей» — ею можно включить «Мою волну». Служба работает
+ * «на переднем плане», иначе Android закрывает её через минуту после сворачивания приложения.
+ * Если компьютер недоступен 10 минут — служба выключается до следующего открытия приложения.
  */
 public class MusicService extends Service {
 
     private static final String CHANNEL = "music";
     private static final int NOTE_ID = 1;
-    private static final long GIVE_UP_MS = 60_000;
+    private static final long GIVE_UP_MS = 10 * 60_000;
 
     private final Handler main = new Handler(Looper.getMainLooper());
     private final ExecutorService io = Executors.newSingleThreadExecutor();
@@ -115,6 +117,8 @@ public class MusicService extends Service {
             return START_NOT_STICKY;
         }
         if (a != null) command(a, null); // кнопка в уведомлении (на старых Android)
+        // На передний план — сразу, пока приложение открыто: позже Android этого уже не разрешит
+        if (!foreground) show();
         main.removeCallbacks(poll);
         main.post(poll);
         return START_NOT_STICKY;
@@ -158,13 +162,13 @@ public class MusicService extends Service {
         if (st != null) lastOk = now;
         String t = st != null ? st.optString("title", "") : "";
         if (!t.isEmpty()) lastMusic = now;
-        if (now - lastOk > GIVE_UP_MS || now - lastMusic > GIVE_UP_MS) {
-            stopSelf(); // компьютер недоступен или музыка давно не играет
+        if (now - lastOk > GIVE_UP_MS) {
+            stopSelf(); // компьютер давно недоступен
             return;
         }
         if (st == null) return; // связь пропала ненадолго — оставляем как было
         if (t.isEmpty()) {
-            hide();
+            idle();
             return;
         }
         String ar = st.optString("artist", ""), al = st.optString("album", "");
@@ -220,9 +224,10 @@ public class MusicService extends Service {
     private void show() {
         Notification.Builder b = Build.VERSION.SDK_INT >= 26 ? new Notification.Builder(this, CHANNEL) : new Notification.Builder(this);
         Intent open = new Intent(this, MainActivity.class).setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_REORDER_TO_FRONT);
+        boolean none = title.isEmpty();
         b.setSmallIcon(R.drawable.ic_note)
-                .setContentTitle(title)
-                .setContentText(artist)
+                .setContentTitle(none ? "Музыка на компьютере" : title)
+                .setContentText(none ? "Нажмите ▶, чтобы включить «Мою волну»" : artist)
                 .setLargeIcon(cover)
                 .setContentIntent(PendingIntent.getActivity(this, 0, open, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT))
                 .setDeleteIntent(action("stop", 9))
@@ -251,22 +256,29 @@ public class MusicService extends Service {
         shown = true;
     }
 
-    private void hide() {
-        if (!shown) return;
-        shown = false;
+    /** Ничего не играет: тихая карточка с кнопкой «плей» (включит «Мою волну» на компьютере). */
+    private void idle() {
+        boolean changed = !title.isEmpty() || playing || !shown;
         title = "";
-        if (foreground) {
-            stopForeground(true);
-            foreground = false;
-        }
-        nm.cancel(NOTE_ID);
+        artist = "";
+        playing = false;
+        liked = null;
+        if (!changed) return;
+        cover = null;
+        coverKey = "";
+        durMs = 0;
+        session.setMetadata(new MediaMetadata.Builder()
+                .putString(MediaMetadata.METADATA_KEY_TITLE, "Музыка на компьютере")
+                .putString(MediaMetadata.METADATA_KEY_ARTIST, "Нажмите ▶, чтобы включить «Мою волну»").build());
+        setState(0);
+        show();
     }
 
     // ---------- Команды ----------
 
     private void command(String a, Double pos) {
         // Сразу показываем результат, не дожидаясь компьютера
-        if ("playpause".equals(a) && shown) {
+        if ("playpause".equals(a) && shown && !title.isEmpty()) {
             playing = !playing;
             setState(currentPos());
             show();

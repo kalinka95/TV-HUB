@@ -200,8 +200,17 @@ function dayName(date, i) {
 }
 
 async function loadWeather() {
+  clearTimeout(WX.retry);
   if (!S.cfg.settings.city) { WX.data = null; renderWeatherChip(); return; }
-  try { WX.data = await api.get('/api/weather'); } catch (e) { return; }
+  let d = null;
+  try { d = await api.get('/api/weather'); } catch (e) {}
+  // Не получилось (например, интернет ещё не подключился после включения) — пробуем снова чуть позже
+  if (!d || !d.now) {
+    WX.fails = (WX.fails || 0) + 1;
+    WX.retry = setTimeout(loadWeather, Math.min(300000, 20000 * WX.fails));
+    if (!d || (WX.data && WX.data.now)) return; // старый прогноз лучше, чем ошибка
+  } else WX.fails = 0;
+  WX.data = d;
   renderWeatherChip();
   if (SV.on) renderSaverInfo();
   if (S.screen === 'main' && S.tab === 'home' && !cur) setWelcomeHero();
@@ -400,74 +409,6 @@ document.addEventListener('mousemove', (e) => {
 }, true);
 document.addEventListener('mousedown', () => { markActivity(); if (SV.on) hideSaver(); }, true);
 
-// Красивая тёмная картинка, если нет интернета: ночное небо, звёзды и горы
-function drawScene(seed) {
-  let s = seed * 9301 + 49297;
-  const rnd = () => ((s = (s * 9301 + 49297) % 233280) / 233280);
-  const c = document.createElement('canvas');
-  c.width = 1920; c.height = 1080;
-  const g = c.getContext('2d');
-  const palettes = [
-    ['#04060f', '#0b1530', '#1b2a55', '#2a3f73'], ['#05030c', '#140a2a', '#2a1745', '#4a2565'],
-    ['#020a0c', '#06222a', '#0e3b45', '#18606b'], ['#07050a', '#1d0f1a', '#3a1a2a', '#5c2a3a'],
-  ];
-  const pal = palettes[seed % palettes.length];
-  const sky = g.createLinearGradient(0, 0, 0, 1080);
-  sky.addColorStop(0, pal[0]); sky.addColorStop(0.55, pal[1]); sky.addColorStop(1, pal[2]);
-  g.fillStyle = sky; g.fillRect(0, 0, 1920, 1080);
-  // Звёзды
-  for (let i = 0; i < 700; i++) {
-    const x = rnd() * 1920, y = rnd() * 700, r = rnd() * 1.4 + 0.2;
-    g.globalAlpha = 0.25 + rnd() * 0.7;
-    g.fillStyle = '#fff';
-    g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill();
-  }
-  g.globalAlpha = 1;
-  // Сияние или луна
-  if (seed % 2 === 0) {
-    for (let k = 0; k < 3; k++) {
-      const grad = g.createLinearGradient(0, 150, 0, 650);
-      grad.addColorStop(0, 'rgba(60,255,180,0)'); grad.addColorStop(0.5, `rgba(${80 + k * 40},255,${190 - k * 30},0.16)`); grad.addColorStop(1, 'rgba(60,255,180,0)');
-      g.fillStyle = grad;
-      g.beginPath();
-      const base = 260 + k * 70, amp = 80 + rnd() * 60, ph = rnd() * 6;
-      g.moveTo(0, base);
-      for (let x = 0; x <= 1920; x += 20) g.lineTo(x, base + Math.sin(x / 300 + ph) * amp);
-      for (let x = 1920; x >= 0; x -= 20) g.lineTo(x, base + 260 + Math.sin(x / 260 + ph) * amp);
-      g.closePath(); g.fill();
-    }
-  } else {
-    const mx = 1350 + rnd() * 300, my = 230 + rnd() * 100;
-    const glow = g.createRadialGradient(mx, my, 10, mx, my, 260);
-    glow.addColorStop(0, 'rgba(255,245,220,0.35)'); glow.addColorStop(1, 'rgba(255,245,220,0)');
-    g.fillStyle = glow; g.fillRect(0, 0, 1920, 1080);
-    g.fillStyle = '#f4efe2'; g.beginPath(); g.arc(mx, my, 46, 0, Math.PI * 2); g.fill();
-  }
-  // Горы слоями
-  const layers = 4;
-  for (let l = 0; l < layers; l++) {
-    const t = l / (layers - 1);
-    g.fillStyle = l === layers - 1 ? '#020305' : pal[3 - Math.min(3, l)] ;
-    g.globalAlpha = 0.55 + t * 0.45;
-    const base = 640 + l * 110;
-    const a1 = 60 + rnd() * 90, a2 = 30 + rnd() * 50, f1 = 0.002 + rnd() * 0.003, f2 = 0.006 + rnd() * 0.008, p1 = rnd() * 9, p2 = rnd() * 9;
-    g.beginPath(); g.moveTo(0, 1080);
-    for (let x = 0; x <= 1920; x += 8) g.lineTo(x, base - Math.abs(Math.sin(x * f1 + p1)) * a1 - Math.sin(x * f2 + p2) * a2);
-    g.lineTo(1920, 1080); g.closePath(); g.fill();
-  }
-  g.globalAlpha = 1;
-  return c.toDataURL('image/jpeg', 0.86);
-}
-
-async function saverImages() {
-  if (SV.walls === null) {
-    try { SV.walls = (await api.get('/api/walls')).walls || []; } catch (e) { SV.walls = []; }
-  }
-  if (SV.walls.length) return SV.walls;
-  if (!SV.scenes.length) for (let i = 0; i < 4; i++) SV.scenes.push({ url: drawScene(i + 1), title: '', copy: '' });
-  return SV.scenes;
-}
-
 async function showSaver() {
   if (SV.on) return;
   SV.on = true;
@@ -475,30 +416,24 @@ async function showSaver() {
   sv.classList.remove('hidden');
   requestAnimationFrame(() => sv.classList.add('show'));
   renderSaverInfo();
-  const imgs = await saverImages();
-  if (!SV.on) return;
-  SV.idx = Math.floor(Math.random() * imgs.length);
-  nextSaverImage(imgs);
-  SV.timers.push(setInterval(() => nextSaverImage(imgs), 60000));
+  if (!WX.data || !WX.data.now) loadWeather();
+  SV.cover = ''; SV.colors = null;
+  saverRGB();
   SV.timers.push(setInterval(renderSaverInfo, 10000));
   SV.timers.push(setInterval(updateSaverMusic, 3000));
+  SV.timers.push(setInterval(() => { if (!SV.colors) saverRGB(); }, 4000));
   updateSaverMusic();
 }
 
-function nextSaverImage(imgs) {
-  const im = imgs[SV.idx % imgs.length];
-  SV.idx++;
-  const layers = [$('svImg0'), $('svImg1')];
-  const next = layers[SV.layer ^ 1], prev = layers[SV.layer];
-  const pre = new Image();
-  pre.onload = () => {
-    next.style.backgroundImage = `url("${im.url}")`;
-    next.classList.remove('kb'); void next.offsetWidth; next.classList.add('kb');
-    next.classList.add('on'); prev.classList.remove('on');
-    SV.layer ^= 1;
-    $('svCaption').textContent = im.title || '';
-  };
-  pre.src = im.url;
+// Фон заставки — переливающиеся пятна, как в музыке. Играет музыка — цвета обложки,
+// нет — случайные яркие цвета, которые всё время меняются.
+function setSaverColors(c) {
+  const bg = $('svBg');
+  ['--mu1', '--mu2', '--mu3'].forEach((v, i) => bg.style.setProperty(v, c[i]));
+}
+function saverRGB() {
+  const h = Math.random() * 360, spread = 70 + Math.random() * 80;
+  setSaverColors([hsl(h, 0.9, 0.5), hsl(h + spread, 0.9, 0.5), hsl(h - spread, 0.9, 0.5)]);
 }
 
 function renderSaverInfo() {
@@ -511,7 +446,8 @@ function renderSaverInfo() {
     const info = wxInfo(d.now.code, d.now.day);
     box.innerHTML = `<div class="sv-wnow">${wxIcon(d.now.code, d.now.day, 'sv-wico')}<div><div class="sv-wtemp">${tempStr(d.now.temp)}</div>` +
       `<div class="sv-wdesc">${esc(info.text)} · ${esc(d.city.name)}</div></div></div>` + forecastHTML(d, 'fc sv-fc');
-  } else box.innerHTML = S.cfg.settings.city ? '' : '<div class="sv-wdesc">Выберите город в настройках, чтобы здесь была погода</div>';
+  } else box.innerHTML = !S.cfg.settings.city ? '<div class="sv-wdesc">Выберите город в настройках, чтобы здесь была погода</div>'
+    : `<div class="sv-wdesc">${esc(S.cfg.settings.city.name)}: ${d && d.error ? 'погода пока не загрузилась, пробую ещё' : 'загружаю погоду…'}</div>`;
   // Чуть сдвигаем блок, чтобы экран не выгорал
   const m = now.getMinutes();
   $('svInfo').style.transform = `translate(${(m % 5) * 0.6}rem, ${-(m % 4) * 0.5}rem)`;
@@ -522,11 +458,25 @@ async function updateSaverMusic() {
   let r;
   try { r = await api.get('/api/media'); } catch (e) { return; }
   const m = r.media, box = $('svMusic');
-  if (m && m.ok && m.title && m.status === 'Playing') {
-    const cover = m.coverVer ? `<img src="/api/media/cover?t=${encodeURIComponent(TOKEN)}&v=${m.coverVer}" alt="">` : '<span class="sv-note">♪</span>';
-    box.innerHTML = `${cover}<div><div class="sv-mt">${esc(m.title)}</div><div class="sv-ma">${esc(m.artist || '')}</div></div>`;
+  if (!SV.on) return;
+  if (m && m.title && m.status === 'Playing') {
+    const u = coverURL(m);
+    const key = m.title + '|' + (m.artist || '') + '|' + u;
+    if (box.dataset.k !== key) {
+      box.dataset.k = key;
+      box.innerHTML = (u ? `<img src="${esc(u)}" alt="">` : '<span class="sv-note">♪</span>') +
+        `<div class="sv-mtext"><div class="sv-mk">Сейчас играет</div><div class="sv-mt">${esc(m.title)}</div><div class="sv-ma">${esc(m.artist || '')}</div></div>`;
+    }
     box.classList.remove('hidden');
-  } else box.classList.add('hidden');
+    if (u && SV.cover !== u) {
+      SV.cover = u;
+      coverColors(u).then((c) => { if (SV.on && SV.cover === u && c) { SV.colors = c; setSaverColors(c); } });
+    } else if (!u && SV.colors) { SV.colors = null; SV.cover = ''; saverRGB(); }
+  } else {
+    box.classList.add('hidden');
+    box.dataset.k = '';
+    if (SV.colors) { SV.colors = null; SV.cover = ''; saverRGB(); }
+  }
 }
 
 function hideSaver() {

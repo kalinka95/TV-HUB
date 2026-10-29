@@ -244,6 +244,12 @@ func getMedia() (mediaState, bool) {
 	defer func() {
 		fillCoverFallback(&st)
 		st.Liked = likeState(st)
+		// Сразу после перемотки страница ещё может сообщать старое место — не мешаем
+		if st.Title != "" && time.Since(seekAt) > 1500*time.Millisecond {
+			if p, ok := pagePosition(st.Title, st.Dur); ok {
+				st.Pos = p
+			}
+		}
 	}()
 	// Windows не сообщает, что играет, или не отдаёт обложку — спросим сайт Яндекс Музыки
 	if st.Title == "" || (st.CoverVer == "" && strings.Contains(strings.ToLower(st.App), "edge")) {
@@ -287,7 +293,7 @@ func mediaSeek(pos float64) error {
 	}
 	pos = max(pos, 0)
 	cmd := "seek:"
-	if seekMusicPage(st.Title, pos) {
+	if seekMusicPage(st.Title, pos, st.Dur) {
 		cmd = "setpos:"
 	} else if !running {
 		return errors.New("этот плеер не даёт перематывать")
@@ -304,41 +310,159 @@ func mediaSeek(pos float64) error {
 	return nil
 }
 
-func seekMusicPage(title string, pos float64) bool {
-	js := fmt.Sprintf(`((pos, title) => {
+// pageAudioJS — функция на странице Яндекс Музыки, которая находит то аудио, что играет сейчас.
+// Аудио может быть не вставлено в страницу, а следующий трек часто загружается заранее
+// вторым аудио — поэтому запоминаем всё, что страница запускала, и выбираем по длительности.
+const pageAudioJS = `(dur) => {
+  if (!window.__tvhubHook) {
+    window.__tvhubHook = true; window.__tvhubEls = new Set();
+    const play = HTMLMediaElement.prototype.play;
+    HTMLMediaElement.prototype.play = function (...a) { window.__tvhubEls.add(this); return play.apply(this, a); };
+  }
+  const els = [...new Set([...document.querySelectorAll('audio,video'), ...window.__tvhubEls])]
+    .filter((x) => isFinite(x.duration) && x.duration > 0 && !x.ended);
+  const score = (x) => (x.paused ? 1000 : 0) + (dur > 0 ? Math.abs(x.duration - dur) : 0) + (x.currentTime > 0 ? 0 : 100);
+  els.sort((a, b) => score(a) - score(b));
+  return els[0] || null;
+}`
+
+// pageSliderJS — полоса перемотки в плеере Яндекс Музыки (если аудио недоступно).
+const pageSliderJS = `() => {
+  const bar = (e) => !!e.closest('footer,[class*=layerBar],[class*=layerbar],[class*=PlayerBar],[class*=playerBar],[class*=FullscreenPlayer],[class*=fullscreenPlayer],[data-test-id*=PLAYERBAR]');
+  return [...document.querySelectorAll('input[type=range]')].find((e) => bar(e) && !/громк|volume/i.test((e.getAttribute('aria-label') || '') + ' ' + e.className)) || null;
+}`
+
+// seekMusicPage перематывает прямо на странице и проверяет, что перемотка случилась.
+func seekMusicPage(title string, pos, dur float64) bool {
+	js := fmt.Sprintf(`((pos, title, dur) => {
 		const m = navigator.mediaSession && navigator.mediaSession.metadata;
-		if (!m || m.title !== title) return false;
-		const a = [...document.querySelectorAll('audio,video')].find((x) => isFinite(x.duration) && x.duration > 0);
-		if (!a) return false;
-		a.currentTime = Math.min(pos, a.duration - 0.5);
-		return true;
-	})(%f, %q)`, pos, title)
+		if (!m || m.title !== title) return 'no';
+		const a = (%s)(dur);
+		if (a) { a.currentTime = Math.max(0, Math.min(pos, a.duration - 0.5)); window.__tvhubSeek = a; return 'audio'; }
+		const s = (%s)();
+		if (!s) return 'no';
+		const max = parseFloat(s.max) || 100, v = dur > 0 && Math.abs(max - dur) > dur * 0.2 ? pos / dur * max : pos;
+		Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(s, String(v));
+		s.dispatchEvent(new Event('input', { bubbles: true }));
+		s.dispatchEvent(new Event('change', { bubbles: true }));
+		window.__tvhubSeek = null;
+		return 'slider';
+	})(%f, %q, %f)`, pageAudioJS, pageSliderJS, pos, title, dur)
+	check := fmt.Sprintf(`((pos, dur) => {
+		const a = window.__tvhubSeek || (%s)(dur);
+		if (a) return Math.abs(a.currentTime - pos) < 4;
+		const s = (%s)();
+		if (!s) return false;
+		const max = parseFloat(s.max) || 100, v = parseFloat(s.value), p = dur > 0 && Math.abs(max - dur) > dur * 0.2 ? v / max * dur : v;
+		return Math.abs(p - pos) < 4;
+	})(%f, %f)`, pageAudioJS, pageSliderJS, pos, dur)
+	val := func(res json.RawMessage) string {
+		var r struct {
+			Result struct {
+				Value any `json:"value"`
+			} `json:"result"`
+		}
+		json.Unmarshal(res, &r)
+		return fmt.Sprint(r.Result.Value)
+	}
 	for _, t := range musicTargets() {
-		res, err := cdpCall(t.WS, "Runtime.evaluate", map[string]any{"expression": js, "returnByValue": true})
-		if err == nil && strings.Contains(string(res), `"value":true`) {
+		res, err := cdpCall(t.WS, "Runtime.evaluate", map[string]any{"expression": js, "returnByValue": true, "userGesture": true})
+		if err != nil || val(res) == "no" {
+			continue
+		}
+		time.Sleep(450 * time.Millisecond)
+		if res, err := cdpCall(t.WS, "Runtime.evaluate", map[string]any{"expression": check, "returnByValue": true}); err == nil && val(res) == "true" {
 			return true
 		}
+		log.Printf("музыка: перемотка на странице не сработала, пробую через Windows")
+		return false
 	}
 	return false
 }
 
+var (
+	pagePosMu    sync.Mutex
+	pagePosAt    time.Time
+	pagePosTitle string
+	pagePosVal   float64
+	pagePosOK    bool
+)
+
+// pagePosition — где сейчас трек по самой странице Яндекс Музыки. Windows узнаёт позицию
+// от плеера не всегда, а страница знает её точно. Ответ живёт полсекунды.
+func pagePosition(title string, dur float64) (float64, bool) {
+	pagePosMu.Lock()
+	defer pagePosMu.Unlock()
+	if pagePosTitle == title && time.Since(pagePosAt) < 500*time.Millisecond {
+		return pagePosVal, pagePosOK
+	}
+	pagePosTitle, pagePosAt, pagePosOK = title, time.Now(), false
+	js := fmt.Sprintf(`((title, dur) => {
+		const m = navigator.mediaSession && navigator.mediaSession.metadata;
+		if (!m || m.title !== title) return -1;
+		const a = (%s)(dur);
+		return a ? a.currentTime : -1;
+	})(%q, %f)`, pageAudioJS, title, dur)
+	for _, t := range musicTargets() {
+		res, err := cdpCall(t.WS, "Runtime.evaluate", map[string]any{"expression": js, "returnByValue": true})
+		if err != nil {
+			continue
+		}
+		var r struct {
+			Result struct {
+				Value float64 `json:"value"`
+			} `json:"result"`
+		}
+		if json.Unmarshal(res, &r) == nil && r.Result.Value >= 0 {
+			pagePosVal, pagePosOK = r.Result.Value, true
+			break
+		}
+	}
+	return pagePosVal, pagePosOK
+}
+
 // likeJS(нажать, название) находит в плеере Яндекс Музыки кнопку «Мне нравится» и
 // возвращает, отмечен ли трек: 'on', 'off' или 'none' (кнопки или трека нет).
+// По подписи кнопки это видно не всегда, поэтому при первом нажатии страница запоминает,
+// как кнопка выглядит до и после (классы и значок), и дальше узнаёт состояние по виду.
 const likeJS = `((click, title) => {
   const m = navigator.mediaSession && navigator.mediaSession.metadata;
   if (!m || (title && m.title !== title)) return 'none';
   const vis = (e) => { const r = e.getBoundingClientRect(); return r.width > 4 && r.height > 4 && getComputedStyle(e).visibility !== 'hidden'; };
   const label = (b) => ((b.getAttribute('aria-label') || '') + ' ' + (b.title || '') + ' ' + (b.getAttribute('data-test-id') || '')).toLowerCase();
   const inBar = (e) => !!e.closest('footer,[class*=layerBar],[class*=layerbar],[class*=PlayerBar],[class*=playerBar],[class*=player-controls],[data-test-id*=PLAYERBAR],[class*=FullscreenPlayer],[class*=fullscreenPlayer]');
-  const b = [...document.querySelectorAll('button,[role=button]')].find((b) => vis(b) && inBar(b)
+  const find = () => [...document.querySelectorAll('button,[role=button]')].find((b) => vis(b) && inBar(b)
     && /like|нрав|лайк|избран|favorite/.test(label(b)) && !/dislike|не нрав|дизлайк/.test(label(b)));
-  if (!b) return 'none';
-  const cls = String(b.className && b.className.baseVal !== undefined ? b.className.baseVal : b.className);
-  const on = b.getAttribute('aria-pressed') === 'true' || b.getAttribute('aria-checked') === 'true'
-    || /_on\b|(^|\s)(active|liked|checked)\b|isLiked|_liked|_active/i.test(cls)
+  const cls = (e) => String(e.className && e.className.baseVal !== undefined ? e.className.baseVal : e.className || '');
+  const fp = (b) => label(b) + '|' + (b.getAttribute('aria-pressed') || '') + (b.getAttribute('aria-checked') || '') + '|' + cls(b).replace(/\b\S*focus\S*/gi, '') + '|' +
+    [...b.querySelectorAll('svg,use,path')].map((e) => (e.getAttribute('href') || e.getAttribute('xlink:href') || '') + cls(e) + (e.getAttribute('fill') || '') + (e.getAttribute('d') || '').slice(0, 40)).join(',');
+  const guess = (b) => b.getAttribute('aria-pressed') === 'true' || b.getAttribute('aria-checked') === 'true'
+    || /_on\b|(^|\s)(active|liked|checked)\b|isLiked|_liked|_active|filled/i.test(cls(b) + ' ' + [...b.querySelectorAll('svg,use')].map((e) => cls(e) + (e.getAttribute('href') || e.getAttribute('xlink:href') || '')).join(' '))
     || /удалить|убрать|remove|unlike/.test(label(b));
-  if (click) b.click();
-  return on ? 'on' : 'off';
+  const store = (k, v) => { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) { return null; } };
+  const state = (b) => {
+    const f = fp(b), on = store('tvhubLikeOn'), off = store('tvhubLikeOff');
+    if (on && f === on) return 'on';
+    if (off && f === off) return 'off';
+    return guess(b) ? 'on' : (on && off ? 'off' : 'unknown');
+  };
+  const b = find();
+  if (!b) return 'none';
+  const before = state(b);
+  if (click) {
+    const f0 = fp(b), wasOn = guess(b);
+    b.click();
+    // Запоминаем, как выглядит кнопка в обоих состояниях
+    setTimeout(() => {
+      const b2 = find();
+      if (!b2) return;
+      const f1 = fp(b2);
+      if (f1 === f0 || (store('tvhubLikeOn') && store('tvhubLikeOff'))) return;
+      const nowOn = before === 'on' ? false : before === 'off' ? true : !wasOn;
+      store('tvhubLikeOn', nowOn ? f1 : f0); store('tvhubLikeOff', nowOn ? f0 : f1);
+    }, 500);
+  }
+  return before;
 })`
 
 func evalLike(t cdpTarget, click bool, title string) string {
@@ -363,7 +487,10 @@ var (
 	likeTitle string
 	likeAt    time.Time
 	likeVal   *bool
+	likeMem   = map[string]bool{} // что отмечали через TVHub: «название|исполнитель» → отмечен
 )
+
+func likeKey(st mediaState) string { return st.Title + "|" + st.Artist }
 
 // likeState — отмечен ли играющий трек в Яндекс Музыке (ответ живёт пару секунд,
 // чтобы частые запросы экрана и телефона не дёргали страницу).
@@ -373,16 +500,29 @@ func likeState(st mediaState) *bool {
 	}
 	likeMu.Lock()
 	defer likeMu.Unlock()
-	if likeTitle == st.Title && time.Since(likeAt) < 2*time.Second {
+	if likeTitle == likeKey(st) && time.Since(likeAt) < 2*time.Second {
 		return likeVal
 	}
-	likeTitle, likeAt, likeVal = st.Title, time.Now(), nil
+	likeTitle, likeAt, likeVal = likeKey(st), time.Now(), nil
 	for _, t := range musicTargets() {
-		if v := evalLike(t, false, st.Title); v != "none" {
-			on := v == "on"
-			likeVal = &on
-			break
+		v := evalLike(t, false, st.Title)
+		if v == "none" {
+			continue
 		}
+		var on bool
+		switch {
+		case v == "on":
+			on = true
+		case v == "off":
+			on = false
+			if mem, ok := likeMem[likeKey(st)]; ok && mem {
+				on = mem // страница могла не успеть обновить кнопку
+			}
+		default: // по виду кнопки не понять — берём то, что помним
+			on = likeMem[likeKey(st)]
+		}
+		likeVal = &on
+		break
 	}
 	return likeVal
 }
@@ -398,14 +538,26 @@ func mediaLike() (bool, error) {
 		if before == "none" {
 			continue
 		}
+		likeMu.Lock()
+		was, known := likeMem[likeKey(st)]
+		likeMu.Unlock()
+		if before == "unknown" {
+			before = "off"
+			if known && was {
+				before = "on"
+			}
+		}
 		on := before != "on"
 		// Страница обновляет кнопку не сразу — проверяем, что получилось
-		time.Sleep(600 * time.Millisecond)
-		if after := evalLike(t, false, st.Title); after != "none" && after != before {
-			on = after == "on"
+		time.Sleep(900 * time.Millisecond)
+		if after := evalLike(t, false, st.Title); after == "on" || after == "off" {
+			if after != before {
+				on = after == "on"
+			}
 		}
 		likeMu.Lock()
-		likeTitle, likeAt, likeVal = st.Title, time.Now(), &on
+		likeMem[likeKey(st)] = on
+		likeTitle, likeAt, likeVal = likeKey(st), time.Now(), &on
 		likeMu.Unlock()
 		return on, nil
 	}
@@ -453,7 +605,7 @@ func webMusicInfo() (mediaState, bool) {
 			const m = navigator.mediaSession && navigator.mediaSession.metadata;
 			if (!m) return null;
 			const art = (m.artwork || []).slice().sort((a, b) => parseInt(b.sizes) - parseInt(a.sizes))[0];
-			const a = document.querySelector('audio');
+			const a = (` + pageAudioJS + `)(0);
 			return { title: m.title, artist: m.artist, album: m.album, cover: art ? art.src : '',
 				status: navigator.mediaSession.playbackState === 'playing' ? 'Playing' : 'Paused',
 				pos: a ? a.currentTime : 0, dur: a && isFinite(a.duration) ? a.duration : 0 };

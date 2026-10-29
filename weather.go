@@ -7,11 +7,13 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -36,6 +38,7 @@ var (
 	geoBase     = envOr("TVHUB_GEO_BASE", "https://geocoding-api.open-meteo.com")
 	weatherBase = envOr("TVHUB_WEATHER_BASE", "https://api.open-meteo.com")
 	bingBase    = envOr("TVHUB_BING_BASE", "https://www.bing.com")
+	wttrBase    = envOr("TVHUB_WTTR_BASE", "https://wttr.in")
 )
 
 func getJSON(ctx context.Context, u string, v any) error {
@@ -161,6 +164,14 @@ func handleWeather(w http.ResponseWriter, r *http.Request) {
 		"wind_speed_unit": {"ms"},
 	}
 	if err := getJSON(ctx, weatherBase+"/v1/forecast?"+q.Encode(), &res); err != nil {
+		// Основной сервис погоды недоступен — пробуем запасной
+		if d, err2 := weatherWttr(ctx, city); err2 == nil {
+			wCache, wKey = d, key
+			writeJSON(w, d)
+			return
+		} else {
+			log.Printf("погода: %v; запасной сервис: %v", err, err2)
+		}
 		if wKey == key && wCache.Now != nil {
 			writeJSON(w, wCache) // нет связи — показываем последний прогноз
 			return
@@ -337,4 +348,81 @@ func handleWall(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Cache-Control", "max-age=86400")
 	http.ServeFile(w, r, filepath.Join(wallDir(), name))
+}
+
+// weatherWttr — запасной источник погоды (wttr.in), если Open-Meteo недоступен.
+func weatherWttr(ctx context.Context, city *City) (weatherData, error) {
+	var res struct {
+		Current []struct {
+			Temp  string `json:"temp_C"`
+			Feels string `json:"FeelsLikeC"`
+			Code  string `json:"weatherCode"`
+			Hum   string `json:"humidity"`
+			Wind  string `json:"windspeedKmph"`
+		} `json:"current_condition"`
+		Weather []struct {
+			Date   string `json:"date"`
+			Max    string `json:"maxtempC"`
+			Min    string `json:"mintempC"`
+			Hourly []struct {
+				Code string `json:"weatherCode"`
+			} `json:"hourly"`
+		} `json:"weather"`
+	}
+	u := wttrBase + "/" + fmt.Sprintf("%.4f,%.4f", city.Lat, city.Lon) + "?format=j1"
+	if err := getJSON(ctx, u, &res); err != nil {
+		return weatherData{}, err
+	}
+	if len(res.Current) == 0 {
+		return weatherData{}, fmt.Errorf("пустой ответ")
+	}
+	num := func(s string) float64 { f, _ := strconv.ParseFloat(strings.TrimSpace(s), 64); return f }
+	code := func(s string) int { return wwoToWMO(int(num(s))) }
+	c := res.Current[0]
+	h := time.Now().Hour()
+	d := weatherData{City: city, Updated: time.Now().Unix(), Now: &weatherNow{
+		Temp: num(c.Temp), Feels: num(c.Feels), Code: code(c.Code), Hum: num(c.Hum),
+		Wind: math.Round(num(c.Wind)/3.6*10) / 10, Day: h >= 7 && h < 19,
+	}}
+	for _, x := range res.Weather {
+		wc := 0
+		if len(x.Hourly) > 4 {
+			wc = code(x.Hourly[4].Code) // полдень
+		} else if len(x.Hourly) > 0 {
+			wc = code(x.Hourly[0].Code)
+		}
+		d.Days = append(d.Days, weatherDay{Date: x.Date, Code: wc, Max: num(x.Max), Min: num(x.Min)})
+	}
+	return d, nil
+}
+
+// wwoToWMO переводит коды погоды wttr.in в коды Open-Meteo, по которым рисуются значки.
+func wwoToWMO(c int) int {
+	switch c {
+	case 113:
+		return 0
+	case 116:
+		return 2
+	case 119, 122:
+		return 3
+	case 143, 248, 260:
+		return 45
+	case 176, 263, 266, 293, 296, 353:
+		return 61
+	case 299, 302, 356:
+		return 63
+	case 305, 308, 359:
+		return 65
+	case 179, 182, 185, 281, 284, 311, 314, 317, 320, 350, 362, 365, 374, 377:
+		return 66
+	case 227, 323, 326, 368:
+		return 71
+	case 329, 332, 335:
+		return 73
+	case 230, 338, 371, 395:
+		return 75
+	case 200, 386, 389, 392:
+		return 95
+	}
+	return 3
 }

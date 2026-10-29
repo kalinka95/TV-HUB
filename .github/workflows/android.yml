@@ -26,16 +26,39 @@ jobs:
         with:
           gradle-version: '8.10.2'
 
+      # Ключ подписи должен быть одним и тем же, иначе Android не ставит новую версию поверх старой.
+      # Ключ создаётся при первой сборке и хранится в кэше GitHub Actions этого репозитория
+      # (в сам репозиторий он не попадает). Кэш не забывается, пока им пользуются хотя бы раз
+      # в неделю, — за этим следит keep-apk-key.yml.
+      - name: Ключ подписи
+        id: key
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.tvhub-apk-key
+          key: tvhub-apk-signing-v1
+
+      - name: Новый ключ подписи (только в первый раз)
+        if: steps.key.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/.tvhub-apk-key
+          openssl rand -hex 16 > ~/.tvhub-apk-key/pass
+          keytool -genkeypair -keystore ~/.tvhub-apk-key/apk.jks -storepass "$(cat ~/.tvhub-apk-key/pass)" -keypass "$(cat ~/.tvhub-apk-key/pass)" \
+            -alias tvhub -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=TVHub Remote, O=TVHub, C=RU"
+
+      - name: Сохранить ключ подписи
+        if: steps.key.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.tvhub-apk-key
+          key: tvhub-apk-signing-v1
+
       - name: Сборка APK
         env:
           VERSION_CODE: ${{ github.run_number }}
           VERSION_NAME: 1.0.${{ github.run_number }}
         run: |
-          # Одноразовый ключ подписи: создаётся здесь и пропадает после сборки
-          export APK_KEY_PASS="$(openssl rand -hex 16)"
-          export APK_KEYSTORE="$RUNNER_TEMP/apk.jks"
-          keytool -genkeypair -keystore "$APK_KEYSTORE" -storepass "$APK_KEY_PASS" -keypass "$APK_KEY_PASS" \
-            -alias tvhub -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=TVHub Remote, O=TVHub, C=RU"
+          export APK_KEY_PASS="$(cat ~/.tvhub-apk-key/pass)"
+          export APK_KEYSTORE="$HOME/.tvhub-apk-key/apk.jks"
           gradle -p android assembleRelease --no-daemon
 
       - name: Публикация

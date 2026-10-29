@@ -1094,6 +1094,8 @@ function listenEvents() {
     else if (ev.type === 'tv') tvNow();
     else if (ev.type === 'appShown') hideLaunchWhenAway();
     else if (ev.type === 'conn') loadConn();
+    else if (ev.type === 'btfound') onBtFound(ev.dev);
+    else if (ev.type === 'audio') loadAudio();
     else if (ev.type === 'launch' && ev.app) { if ($('launch').classList.contains('hidden')) { closeSearch(); hideSaver(); showLaunch(ev.app); } }
     else if (ev.type === 'key') {
       const key = KEYS[ev.key] || ev.key;

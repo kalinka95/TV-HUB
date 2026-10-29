@@ -58,14 +58,19 @@ func connStatus() map[string]any {
 	return map[string]any{"bt": map[string]any{"radio": devBTRadio, "devices": paired}, "wifi": map[string]any{"adapter": true, "current": cur}}
 }
 
-func btAction(action, id string, on bool) (map[string]any, error) {
-	log.Printf("bt %s %s %v", action, id, on)
+func btAction(action, id, name string, on bool) (map[string]any, error) {
+	log.Printf("bt %s %s %s %v", action, id, name, on)
 	switch action {
 	case "scan":
-		time.Sleep(3 * time.Second)
-		if !slices.ContainsFunc(devBT, func(d btDevice) bool { return d.ID == "bt4" }) {
-			devBT = append(devBT, btDevice{ID: "bt4", Name: "AirPods Pro", Kind: "headphones"}, btDevice{ID: "bt5", Name: "Galaxy S23", Kind: "phone"})
+		// Устройства находятся по одному — как на настоящем компьютере
+		for _, d := range []btDevice{{ID: "bt4", Name: "AirPods Pro", Kind: "headphones"}, {ID: "bt5", Name: "Galaxy S23", Kind: "phone"}} {
+			time.Sleep(1200 * time.Millisecond)
+			if !slices.ContainsFunc(devBT, func(x btDevice) bool { return x.ID == d.ID }) {
+				devBT = append(devBT, d)
+			}
+			pushEvent(map[string]any{"type": "btfound", "dev": d})
 		}
+		time.Sleep(time.Second)
 		return map[string]any{"devices": devBT}, nil
 	case "radio":
 		devBTRadio = map[bool]string{true: "on", false: "off"}[on]
@@ -107,6 +112,21 @@ func wifiAction(action, ssid, pass string) (map[string]any, error) {
 		}
 	}
 	return nil, nil
+}
+
+var devAudio = []audioOut{
+	{ID: "a1", Name: "Динамики (Realtek(R) Audio)", Kind: "speaker"},
+	{ID: "a2", Name: "HARPER (Intel(R) Display Audio)", Kind: "tv", Default: true},
+	{ID: "a3", Name: "Наушники (OnePlus Buds Pro 2R)", Kind: "headphones"},
+	{ID: "a4", Name: "Головной телефон (OnePlus Buds Pro 2R Hands-Free)", Kind: "call"},
+}
+
+func audioOutputs() ([]audioOut, error) { return devAudio, nil }
+func setAudioOutput(id string) error {
+	for i := range devAudio {
+		devAudio[i].Default = devAudio[i].ID == id
+	}
+	return nil
 }
 
 func signInApp(a App) error { log.Printf("signin %s", a.Target); return nil }

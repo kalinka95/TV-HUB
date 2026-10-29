@@ -5,7 +5,9 @@
 package main
 
 import (
+	"bufio"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,6 +19,7 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"unicode/utf16"
 )
 
 // Общее начало сценариев: ожидание асинхронных операций WinRT и нужные типы.
@@ -96,6 +99,10 @@ public static class TvhubBt {
     BluetoothFindDeviceClose(h);
     return list.ToArray();
   }
+  // Опрос эфира в фоне: пока он идёт, сценарий показывает найденное современным поиском
+  public static System.Threading.Tasks.Task<TvhubFound[]> InquiryAsync(byte t) {
+    return System.Threading.Tasks.Task.Run(() => Inquiry(t));
+  }
   public static uint Set(ulong addr, string svc, bool on) {
     IntPtr radio = Radio();
     if (radio == IntPtr.Zero) return 0xFFFFFFFF;
@@ -134,53 +141,68 @@ function DevInfo($id) {
 }
 # Поиск устройств двумя способами сразу: классический опрос эфира (так находятся обычные
 # наушники и колонки в режиме сопряжения) и современный поиск Windows (ещё и Bluetooth LE).
+# Каждое найденное устройство сразу печатается отдельной строкой — TVHub показывает его,
+# не дожидаясь конца поиска.
+function EmitDev($o) { [Console]::Out.WriteLine((@{ dev = $o } | ConvertTo-Json -Compress -Depth 4)); [Console]::Out.Flush() }
 function BtScan($secs) {
-  BtNative
+  $errs = @()
+  try { BtNative } catch { $errs += 'native: ' + $_.Exception.Message }
   $start = Get-Date
   $aqs = '(System.Devices.Aep.ProtocolId:="{e0cbf06c-cd8b-4647-bb8a-263b43f0f974}" OR System.Devices.Aep.ProtocolId:="{bb7bb05e-5972-42b5-94fc-76eaa7084d49}")'
-  $seen = @{}; $n = 0; $watch = $false
+  $seen = @{}; $names = @{}; $n = 0; $watch = $false; $classicN = 0
   try {
     $w = [Windows.Devices.Enumeration.DeviceInformation]::CreateWatcher($aqs, $props, $aepKind)
     $null = Register-ObjectEvent -InputObject $w -EventName Added -SourceIdentifier tvAdd -ErrorAction Stop
     $null = Register-ObjectEvent -InputObject $w -EventName Updated -SourceIdentifier tvUpd -ErrorAction Stop
     $w.Start(); $watch = $true
-  } catch {}
-  # Классический опрос (~10 секунд); современный поиск тем временем копит найденное
-  $classic = @()
-  try { $classic = @([TvhubBt]::Inquiry(8)) } catch {}
-  while ($watch) {
-    $left = $secs - ((Get-Date) - $start).TotalSeconds
-    $e = Get-Event | Select-Object -First 1
-    if (-not $e) { if ($left -le 0) { break }; Start-Sleep -Milliseconds 300; continue }
-    $x = $e.SourceEventArgs
-    if ($e.SourceIdentifier -eq 'tvAdd' -and $x) { $seen[$x.Id] = $x; $n++ }
-    elseif ($e.SourceIdentifier -eq 'tvUpd' -and $x -and $seen.ContainsKey($x.Id)) { $seen[$x.Id].Update($x) }
-    Remove-Event -EventIdentifier $e.EventIdentifier
-  }
-  if ($watch) { $w.Stop(); Unregister-Event -SourceIdentifier tvAdd; Unregister-Event -SourceIdentifier tvUpd }
-  if (-not $watch -or $n -eq 0) {
-    $list = Await ([Windows.Devices.Enumeration.DeviceInformation]::FindAllAsync($aqs, $props, $aepKind)) ([Windows.Devices.Enumeration.DeviceInformationCollection]) 15000
-    foreach ($d in $list) { $seen[$d.Id] = $d }
-  }
-  $out = @(); $names = @{}
-  foreach ($c in $classic) {
-    $name = [string]$c.Name
-    if (-not $name -or $names.ContainsKey($name)) { continue }
-    $names[$name] = 1
-    $out += @{ id = 'addr:' + $c.Address.ToString('X12'); name = $name; cod = [int64]$c.Cod; cls = ''; paired = [bool]$c.Paired; connected = [bool]$c.Connected }
-  }
-  foreach ($d in ($seen.Values | Sort-Object { $_.Id -like 'BluetoothLE*' })) {
+  } catch { $errs += 'watch: ' + $_.Exception.Message }
+  $task = $null
+  try { $task = [TvhubBt]::InquiryAsync(6) } catch { $errs += 'classic: ' + $_.Exception.Message }
+  $emitW = {
+    param($d)
     $name = [string]$d.Name
-    if (-not $name -or $names.ContainsKey($name)) { continue }
+    if (-not $name -or $names.ContainsKey($name)) { return }
     $names[$name] = 1
     $cls = ''
     if ($d.Id -notlike 'BluetoothLE*') {
-      $bd = Await ([Windows.Devices.Bluetooth.BluetoothDevice]::FromIdAsync($d.Id)) ([Windows.Devices.Bluetooth.BluetoothDevice]) 3000
+      $bd = Await ([Windows.Devices.Bluetooth.BluetoothDevice]::FromIdAsync($d.Id)) ([Windows.Devices.Bluetooth.BluetoothDevice]) 2000
       if ($bd) { $cls = [string]$bd.ClassOfDevice.MajorClass + '/' + [string]$bd.ClassOfDevice.MinorClass; $bd.Dispose() }
     }
-    $out += @{ id = $d.Id; name = $name; cod = 0; cls = $cls; paired = [bool]$d.Properties['System.Devices.Aep.IsPaired']; connected = [bool]$d.Properties['System.Devices.Aep.IsConnected'] }
+    EmitDev @{ id = $d.Id; name = $name; cod = 0; cls = $cls; paired = [bool]$d.Properties['System.Devices.Aep.IsPaired']; connected = [bool]$d.Properties['System.Devices.Aep.IsConnected'] }
   }
-  @{ devices = $out; events = $n; total = $seen.Count; classic = $classic.Count; watch = $watch }
+  while ($true) {
+    if ($task -and $task.IsCompleted) {
+      if ($task.IsFaulted) { $errs += 'classic: ' + $task.Exception.InnerException.Message }
+      else {
+        foreach ($c in $task.Result) {
+          $classicN++
+          $name = [string]$c.Name
+          if (-not $name -or $names.ContainsKey($name)) { continue }
+          $names[$name] = 1
+          EmitDev @{ id = 'addr:' + $c.Address.ToString('X12'); name = $name; cod = [int64]$c.Cod; cls = ''; paired = [bool]$c.Paired; connected = [bool]$c.Connected }
+        }
+      }
+      $task = $null
+    }
+    $e = $null
+    if ($watch) { $e = Get-Event | Select-Object -First 1 }
+    if ($e) {
+      $x = $e.SourceEventArgs
+      if ($e.SourceIdentifier -eq 'tvAdd' -and $x) { $seen[$x.Id] = $x; $n++; & $emitW $x }
+      elseif ($e.SourceIdentifier -eq 'tvUpd' -and $x -and $seen.ContainsKey($x.Id)) { $seen[$x.Id].Update($x); & $emitW $seen[$x.Id] }
+      Remove-Event -EventIdentifier $e.EventIdentifier
+      continue
+    }
+    $el = ((Get-Date) - $start).TotalSeconds
+    if (($el -ge $secs -and -not $task) -or $el -ge $secs + 8) { break }
+    Start-Sleep -Milliseconds 150
+  }
+  if ($watch) { $w.Stop(); Unregister-Event -SourceIdentifier tvAdd; Unregister-Event -SourceIdentifier tvUpd }
+  if (-not $watch -or $n -eq 0) {
+    $list = Await ([Windows.Devices.Enumeration.DeviceInformation]::FindAllAsync($aqs, $props, $aepKind)) ([Windows.Devices.Enumeration.DeviceInformationCollection]) 10000
+    foreach ($d in $list) { $seen[$d.Id] = $d; & $emitW $d }
+  }
+  @{ done = $true; events = $n; total = $seen.Count; classic = $classicN; watch = $watch; errs = $errs }
 }
 function Wifi {
   $null = Await ([Windows.Devices.WiFi.WiFiAdapter]::RequestAccessAsync()) ([Windows.Devices.WiFi.WiFiAccessStatus])
@@ -208,7 +230,7 @@ const btScript = `
 $act = $env:TVHUB_ACT; $id = $env:TVHUB_ID
 switch ($act) {
   'scan' {
-    Emit (BtScan 15)
+    Emit (BtScan 10)
   }
   'radio' {
     $r = BtRadio
@@ -301,6 +323,12 @@ switch ($act) {
 
 // runConnPS запускает сценарий PowerShell и разбирает его ответ (JSON в последней строке).
 func runConnPS(script string, env map[string]string, timeout time.Duration, out any) error {
+	return runConnPSLines(script, env, timeout, out, nil)
+}
+
+// runConnPSLines — то же, но промежуточные строки ответа (всё, кроме последней) сразу
+// отдаёт onLine: так поиск показывает устройства по мере нахождения.
+func runConnPSLines(script string, env map[string]string, timeout time.Duration, out any, onLine func([]byte)) error {
 	ps := filepath.Join(os.Getenv("SystemRoot"), `System32\WindowsPowerShell\v1.0\powershell.exe`)
 	full := strings.ReplaceAll(connPrelude, "{BT}", "`") + script
 	// Сценарий длинный — в командную строку Windows (до 32 тысяч символов) он не влезает,
@@ -323,9 +351,27 @@ func runConnPS(script string, env map[string]string, timeout time.Duration, out 
 	for k, v := range env {
 		cmd.Env = append(cmd.Env, k+"="+v)
 	}
-	res, err := cmd.Output()
-	lines := strings.Split(strings.TrimSpace(string(res)), "\n")
-	last := strings.TrimSpace(lines[len(lines)-1])
+	pipe, err := cmd.StdoutPipe()
+	if err != nil {
+		return fmt.Errorf("Windows не ответила: %v", err)
+	}
+	if err = cmd.Start(); err != nil {
+		return fmt.Errorf("Windows не ответила: %v", err)
+	}
+	last := ""
+	sc := bufio.NewScanner(pipe)
+	sc.Buffer(make([]byte, 64*1024), 4<<20)
+	for sc.Scan() {
+		l := strings.TrimSpace(sc.Text())
+		if l == "" {
+			continue
+		}
+		if last != "" && onLine != nil {
+			onLine([]byte(last))
+		}
+		last = l
+	}
+	err = cmd.Wait()
 	if last == "" {
 		if err != nil {
 			return fmt.Errorf("Windows не ответила: %v", err)
@@ -419,17 +465,18 @@ var btStatusText = map[string]string{
 	"Win32_1244":                   "Устройство не приняло подключение. Переведите его в режим сопряжения и попробуйте снова",
 }
 
-func btAction(action, id string, on bool) (map[string]any, error) {
+func btAction(action, id, name string, on bool) (map[string]any, error) {
 	defer dropConnCache()
 	var r struct {
-		Devices []psDev `json:"devices"`
-		Status  string  `json:"status"`
-		Error   string  `json:"error"`
-		Codes   []int64 `json:"codes"`
-		Events  int     `json:"events"` // сколько устройств нашёл поиск (для журнала)
-		Total   int     `json:"total"`
-		Classic int     `json:"classic"`
-		Watch   bool    `json:"watch"`
+		Devices []psDev  `json:"devices"`
+		Status  string   `json:"status"`
+		Error   string   `json:"error"`
+		Codes   []int64  `json:"codes"`
+		Events  int      `json:"events"` // сколько устройств нашёл поиск (для журнала)
+		Total   int      `json:"total"`
+		Classic int      `json:"classic"`
+		Watch   bool     `json:"watch"`
+		Errs    []string `json:"errs"`
 	}
 	env := map[string]string{"TVHUB_ACT": action, "TVHUB_ID": id}
 	if on {
@@ -439,10 +486,34 @@ func btAction(action, id string, on bool) (map[string]any, error) {
 	if action == "pair" {
 		timeout = 75 * time.Second
 	}
-	if err := runConnPS(btScript, env, timeout, &r); err != nil {
+	var found []psDev
+	onLine := func(l []byte) { // поиск: устройство найдено — сразу показываем
+		var x struct {
+			Dev *psDev `json:"dev"`
+		}
+		if json.Unmarshal(l, &x) == nil && x.Dev != nil {
+			found = append(found, *x.Dev)
+			pushEvent(map[string]any{"type": "btfound", "dev": toDevices([]psDev{*x.Dev})[0]})
+		}
+	}
+	clicked := false
+	if action == "pair" { // Windows спросит «Связать устройство? Разрешить?» — отвечаем сами
+		ctx, stop := context.WithCancel(context.Background())
+		defer stop()
+		done := make(chan bool, 1)
+		go func() { done <- btAllow(ctx, name) }()
+		defer func() {
+			stop()
+			if clicked = <-done; clicked {
+				wv.Dispatch(bringToFront)
+			}
+		}()
+	}
+	if err := runConnPSLines(btScript, env, timeout, &r, onLine); err != nil {
 		return nil, err
 	}
-	log.Printf("bluetooth %s: %s %s %v классический=%d современный=%d/%d (слушал=%v) с именем=%d", action, r.Status, r.Error, r.Codes, r.Classic, r.Events, r.Total, r.Watch, len(r.Devices))
+	r.Devices = append(found, r.Devices...)
+	log.Printf("bluetooth %s: %s %s %v классический=%d современный=%d/%d (слушал=%v) с именем=%d %v", action, r.Status, r.Error, r.Codes, r.Classic, r.Events, r.Total, r.Watch, len(r.Devices), r.Errs)
 	switch r.Error {
 	case "noradio":
 		return nil, errors.New("на компьютере нет Bluetooth")
@@ -451,7 +522,7 @@ func btAction(action, id string, on bool) (map[string]any, error) {
 	}
 	switch action {
 	case "scan":
-		return map[string]any{"devices": toDevices(r.Devices), "seen": r.Classic + r.Total}, nil
+		return map[string]any{"devices": toDevices(r.Devices), "seen": r.Classic + r.Total, "errs": r.Errs}, nil
 	case "radio":
 		if r.Status != "Allowed" {
 			return nil, errors.New("Windows не дала переключить Bluetooth")
@@ -463,12 +534,16 @@ func btAction(action, id string, on bool) (map[string]any, error) {
 			}
 			return nil, fmt.Errorf("не получилось (%s)", r.Status)
 		}
+		if action == "pair" {
+			go followAudio(name)
+		}
 	case "connect":
 		for _, c := range r.Codes {
 			if c == 5 {
 				return nil, errors.New(btStatusText["AccessDenied"])
 			}
 		}
+		go followAudio(name)
 		// Windows подключается ещё пару секунд
 		time.Sleep(3 * time.Second)
 	}
@@ -526,4 +601,67 @@ func wifiAction(action, ssid, pass string) (map[string]any, error) {
 		return nil, fmt.Errorf("не получилось подключиться (%s)", r.Status)
 	}
 	return nil, nil
+}
+
+// btAllowScript ждёт окно Windows «Связать устройство? … Разрешить?» про это устройство
+// и нажимает «Разрешить» (через специальные возможности Windows — UI Automation).
+const btAllowScript = `
+$ErrorActionPreference = 'SilentlyContinue'
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
+$A = [Windows.Automation.AutomationElement]
+$CT = [Windows.Automation.ControlType]
+$name = $env:TVHUB_NAME
+$ok = '(?i)^(разрешить|allow|подключить|connect|связать|pair|да|yes)$'
+$end = (Get-Date).AddSeconds(70)
+while ((Get-Date) -lt $end) {
+  foreach ($w in $A::RootElement.FindAll([Windows.Automation.TreeScope]::Children, [Windows.Automation.Condition]::TrueCondition)) {
+    $wn = [string]$w.Current.Name
+    if ($wn -notmatch '(?i)связ|сопряж|pair|bluetooth|устройств|device|добав') { continue }
+    $all = $w.FindAll([Windows.Automation.TreeScope]::Descendants, [Windows.Automation.Condition]::TrueCondition)
+    $text = ($all | ForEach-Object { [string]$_.Current.Name }) -join ' '
+    # Только окно про наше устройство — чужие окна не трогаем
+    if (-not $name -or $text.IndexOf($name, [StringComparison]::OrdinalIgnoreCase) -lt 0) { continue }
+    foreach ($e in $all) {
+      if ($e.Current.ControlType -ne $CT::Button -or ([string]$e.Current.Name).Trim() -notmatch $ok) { continue }
+      $p = $null
+      if ($e.TryGetCurrentPattern([Windows.Automation.InvokePattern]::Pattern, [ref]$p)) {
+        $p.Invoke()
+        [Console]::Out.WriteLine('clicked|' + $wn + '|' + $e.Current.Name)
+        exit
+      }
+    }
+  }
+  Start-Sleep -Milliseconds 400
+}
+[Console]::Out.WriteLine('none')
+`
+
+// btAllow нажимает «Разрешить» в окне сопряжения Windows, пока идёт подключение (до отмены ctx).
+func btAllow(ctx context.Context, name string) bool {
+	if name == "" {
+		return false
+	}
+	ps := filepath.Join(os.Getenv("SystemRoot"), `System32\WindowsPowerShell\v1.0\powershell.exe`)
+	u := utf16.Encode([]rune(btAllowScript))
+	b := make([]byte, len(u)*2)
+	for i, c := range u {
+		b[2*i], b[2*i+1] = byte(c), byte(c>>8)
+	}
+	cmd := exec.CommandContext(ctx, ps, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", base64.StdEncoding.EncodeToString(b))
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: createNoWindow}
+	cmd.Env = append(os.Environ(), "TVHUB_NAME="+name)
+	out, _ := cmd.Output()
+	res := strings.TrimSpace(string(out))
+	if res != "" {
+		log.Printf("bluetooth: окно сопряжения: %s", res)
+	}
+	return strings.HasPrefix(res, "clicked|")
+}
+
+// followAudio переводит звук на только что подключённые наушники или колонку.
+func followAudio(name string) {
+	if name != "" && audioFollowDevice(name) {
+		pushEvent(map[string]any{"type": "audio"})
+	}
 }

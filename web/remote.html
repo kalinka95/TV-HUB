@@ -96,6 +96,15 @@ header { display: flex; align-items: center; gap: 10px; height: 44px; flex: none
 .key.primary { background: var(--accent); }
 /* Эквалайзер */
 .eq-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+/* Куда выводить звук */
+.ao-list { display: flex; flex-direction: column; gap: 8px; margin: 10px 0 20px; }
+.ao { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 14px; background: var(--surface); text-align: left; width: 100%; }
+.ao.on { box-shadow: inset 0 0 0 1.5px var(--accent); }
+.ao-ico { width: 38px; height: 38px; border-radius: 11px; background: var(--surface-2); display: grid; place-items: center; flex: none; }
+.ao.on .ao-ico { background: var(--accent); }
+.ao-ico svg { width: 22px; height: 22px; stroke: var(--text); fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.ao-t { font-size: 15px; font-weight: 600; min-width: 0; flex: 1; }
+.ao-s { display: block; font-size: 12.5px; color: var(--muted); font-weight: 400; margin-top: 2px; }
 .eq-switch { width: 54px; height: 32px; border-radius: 16px; background: var(--surface-2); position: relative; flex: none; transition: background .2s; }
 .eq-switch i { position: absolute; top: 4px; left: 4px; width: 24px; height: 24px; border-radius: 50%; background: var(--muted); transition: transform .2s, background .2s; }
 .eq-switch.on { background: var(--accent); }
@@ -359,6 +368,8 @@ header { display: flex; align-items: center; gap: 10px; height: 44px; flex: none
 
 <!-- Эквалайзер -->
 <section class="view hidden" id="v-eq">
+  <div class="wins-title">Куда выводить звук</div>
+  <div class="ao-list" id="aoList"></div>
   <div class="eq-head">
     <div class="wins-title">Эквалайзер компьютера</div>
     <button class="eq-switch" id="eqOn" aria-label="Включить эквалайзер"><i></i></button>
@@ -1020,7 +1031,45 @@ $('eqInstall').onclick = async () => {
   else if (d) toast(d.error || 'Не получилось', 5000);
   setTimeout(async () => renderEQ(await eqReq()), 1500);
 };
-async function loadEQ() { renderEQ(await eqReq()); }
+async function loadEQ() { renderEQ(await eqReq()); loadAO(); }
+
+// ----- Куда выводить звук -----
+const AO_ICON = {
+  tv: '<rect x="2" y="5" width="20" height="13" rx="2"/><path d="M8 21h8"/>',
+  headphones: '<path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1v-6h3zM3 19a2 2 0 0 0 2 2h1v-6H3z"/>',
+  speaker: '<path d="M4 9h4l5-4v14l-5-4H4z"/><path d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12"/>',
+  call: '<path d="M4 15v-3a8 8 0 0 1 16 0v3"/><path d="M20 15a2 2 0 0 1-2 2h-1v-5h3zM4 15a2 2 0 0 0 2 2h1v-5H4z"/>',
+};
+function renderAO(outs) {
+  const box = $('aoList');
+  box.innerHTML = '';
+  const sub = { tv: 'Телевизор', headphones: 'Наушники', speaker: 'Динамики', call: 'Для звонков — музыка звучит хуже' };
+  outs.slice().sort((a, b) => (a.kind === 'call') - (b.kind === 'call')).forEach((o) => {
+    const b = document.createElement('button');
+    b.className = 'ao' + (o.default ? ' on' : '');
+    b.innerHTML = `<span class="ao-ico"><svg viewBox="0 0 24 24">${AO_ICON[o.kind] || AO_ICON.speaker}</svg></span><span class="ao-t">${esc(o.name)}<span class="ao-s">${o.default ? 'Звук идёт сюда' : sub[o.kind] || ''}</span></span>`;
+    b.addEventListener('click', async () => {
+      if (o.default) return;
+      buzz();
+      try {
+        const r = await fetch('/r/api/audio', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Remote': KEY }, body: JSON.stringify({ id: o.id }) });
+        const d = await r.json();
+        if (!d.ok) { toast(d.error || 'Не получилось'); return; }
+        renderAO(d.outputs || []);
+        toast('Звук: ' + o.name);
+      } catch (e) { toast('Нет связи с компьютером'); }
+    });
+    box.append(b);
+  });
+  if (!outs.length) box.innerHTML = '<p class="note">Windows не нашла устройств вывода звука.</p>';
+}
+async function loadAO() {
+  try {
+    const r = await fetch('/r/api/audio', { headers: { 'X-Remote': KEY } });
+    const d = await r.json();
+    if (d.ok) renderAO(d.outputs || []);
+  } catch (e) {}
+}
 document.querySelector('#tabs [data-v="eq"]').addEventListener('click', loadEQ);
 if (!$('v-eq').classList.contains('hidden')) loadEQ();
 

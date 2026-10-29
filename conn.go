@@ -105,10 +105,11 @@ func handleBT(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Action string
 		ID     string
+		Name   string
 		On     bool
 	}
 	json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&req)
-	res, err := btAction(req.Action, req.ID, req.On)
+	res, err := btAction(req.Action, req.ID, req.Name, req.On)
 	if err != nil {
 		writeJSON(w, map[string]any{"ok": false, "error": err.Error()})
 		return

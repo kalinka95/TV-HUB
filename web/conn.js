@@ -15,7 +15,10 @@ const CN_ICON = {
   tv: '<rect x="2" y="5" width="20" height="13" rx="2"/><path d="M8 21h8"/>',
   lock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
   check: '<path d="M5 12l5 5L20 7"/>',
+  sound: '<path d="M4 9h4l5-4v14l-5-4H4z"/><path d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12"/>',
+  call: '<path d="M4 15v-3a8 8 0 0 1 16 0v3"/><path d="M20 15a2 2 0 0 1-2 2h-1v-5h3zM4 15a2 2 0 0 0 2 2h1v-5H4z"/><path d="M18 17v1a3 3 0 0 1-3 3h-2"/>',
 };
+const AUDIO_ICON = { tv: 'tv', headphones: 'headphones', speaker: 'sound', call: 'call' };
 const cnSvg = (k, cls = '') => `<svg class="${cls}" viewBox="0 0 24 24">${CN_ICON[k] || CN_ICON.bt}</svg>`;
 
 // Значок Wi-Fi: дуги светятся по силе сигнала (0–4)
@@ -75,12 +78,62 @@ function qsRow(key, icon, title, sub, opts = {}) {
   return r;
 }
 
+// ---------- Звук: куда выводить ----------
+
+async function loadAudio() {
+  try {
+    const r = await api.get('/api/audio');
+    if (!r.ok) return;
+    CN.audio = r.outputs || [];
+  } catch (e) { return; }
+  renderAudioChip();
+  if (qsOpen() && CN.view === 'audio') renderQS();
+}
+
+function renderAudioChip() {
+  const a = $('audioBtn');
+  if (!a) return;
+  const outs = CN.audio || [];
+  const d = outs.find((o) => o.default);
+  a.classList.toggle('hidden', !outs.length);
+  a.classList.toggle('lit', !!d && d.kind === 'headphones');
+  a.innerHTML = cnSvg(d ? AUDIO_ICON[d.kind] : 'sound');
+  a._act = () => openQS('audio');
+  a._info = { kicker: 'Звук', title: d ? d.name : 'Звук', sub: 'OK — выбрать, куда выводить звук: телевизор, динамики или наушники' };
+  if (cur === a) setHero(a._info);
+}
+
+function renderAudioBody(body) {
+  const outs = (CN.audio || []).slice().sort((a, b) => (a.kind === 'call') - (b.kind === 'call'));
+  const d = outs.find((o) => o.default);
+  body.append(el('div', 'qs-head', `<span class="qs-hico">${cnSvg('sound')}</span><span class="qs-htxt"><span class="qs-title">Звук</span><span class="qs-sub">${d ? 'Сейчас: ' + esc(d.name) : 'Куда выводить звук'}</span></span>`));
+  const list = el('div', 'qs-list');
+  list.append(el('div', 'qs-sec', 'Куда выводить звук'));
+  const sub = { tv: 'Телевизор', headphones: 'Наушники', speaker: 'Динамики', call: 'Гарнитура для звонков — музыка звучит хуже' };
+  for (const o of outs) {
+    list.append(qsRow('au:' + o.id, cnSvg(AUDIO_ICON[o.kind]), o.name, o.default ? 'Звук идёт сюда' : sub[o.kind] + ' · OK — выводить сюда',
+      { on: o.default, pill: o.default ? 'Сейчас' : '', act: async () => {
+        if (o.default) return;
+        const r = await api.post('/api/audio', { id: o.id }).catch((e) => ({ ok: false, error: e.message }));
+        if (!r.ok) { toast(r.error, 5000); return; }
+        CN.audio = r.outputs || CN.audio;
+        toast('Звук: ' + o.name, 3000);
+        renderAudioChip();
+        renderQS();
+      } }));
+  }
+  if (!outs.length) list.append(el('p', 'qs-note', 'Windows не нашла устройств вывода звука.'));
+  body.append(list);
+}
+
 function renderQS(first) {
   const body = $('qsBody');
   if (!body || !qsOpen()) return;
   const k = cur && cur.dataset.k;
   body.innerHTML = '';
-  if (CN.view === 'bt') renderBTBody(body); else renderWifiBody(body);
+  if (CN.view === 'bt') renderBTBody(body);
+  else if (CN.view === 'audio') renderAudioBody(body);
+  else renderWifiBody(body);
   const row = body.querySelector('.qs-row:not(.busy)');
   if (CN.autoFocus && row) { CN.autoFocus = false; setFocus(row); return; }
   if (first || !focusByKey(k, $('modal'))) {
@@ -110,6 +163,13 @@ function openBT() {
   if (((CN.st && CN.st.bt) || {}).radio !== 'off') btScan();
 }
 
+// Поиск присылает устройства по одному — показываем сразу
+function onBtFound(dev) {
+  if (!dev || !CN.scanning || !qsOpen() || CN.view !== 'bt') return;
+  mergeDevs([dev]);
+  renderQS();
+}
+
 async function btScan() {
   if (CN.scanning) return;
   CN.scanning = true;
@@ -125,7 +185,7 @@ async function btScan() {
 async function btDo(d, action, okText) {
   CN.busy[d.id] = action;
   renderQS();
-  const r = await api.post('/api/bt', { action, id: d.id }).catch((e) => ({ ok: false, error: e.message }));
+  const r = await api.post('/api/bt', { action, id: d.id, name: d.name }).catch((e) => ({ ok: false, error: e.message }));
   delete CN.busy[d.id];
   if (r.ok) {
     if (action === 'unpair') { d.paired = false; d.connected = false; }
@@ -175,7 +235,7 @@ function renderBTBody(body) {
     list.append(qsRow('bt:' + d.id, cnSvg(d.kind), d.name, busy ? 'Подключаю… Подтвердите на устройстве, если оно попросит' : KIND_NAME[d.kind] + ' · OK — подключить',
       { busy: !!busy, act: () => btDo(d, 'pair', '«' + d.name + '» подключено') }));
   }
-  if (CN.scanning) list.append(el('div', 'qs-scan', '<i class="qs-spin"></i>Ищу устройства… Переведите наушники в режим сопряжения: обычно нужно зажать кнопку питания или Bluetooth, пока не замигает индикатор'));
+  if (CN.scanning) list.append(el('div', 'qs-scan', '<i class="qs-spin"></i>' + (found.length ? 'Ищу ещё…' : 'Ищу устройства… Переведите наушники в режим сопряжения: обычно нужно зажать кнопку питания или Bluetooth, пока не замигает индикатор')));
   else if (CN.scanned && !found.length) list.append(el('p', 'qs-note', CN.seen
     ? 'Новых устройств не нашлось. Включите на наушниках режим сопряжения (зажмите кнопку питания или Bluetooth, пока индикатор не замигает) и нажмите «Искать ещё раз». Если наушники подключены к телефону — выключите Bluetooth на телефоне.'
     : 'Windows не увидела рядом ни одного Bluetooth-устройства. Проверьте, что Bluetooth на ноутбуке включён (переключатель вверху) и работает в параметрах Windows, переведите наушники в режим сопряжения и нажмите «Искать ещё раз».'));
@@ -265,4 +325,5 @@ function renderWifiBody(body) {
 
 // Значки вверху: обновляем раз в полминуты, пока виден главный экран
 loadConn();
-setInterval(() => { if (S.screen === 'main' && document.visibilityState === 'visible' && !qsOpen()) loadConn(); }, 30000);
+loadAudio();
+setInterval(() => { if (S.screen === 'main' && document.visibilityState === 'visible' && !qsOpen()) { loadConn(); loadAudio(); } }, 30000);

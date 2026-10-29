@@ -25,7 +25,7 @@ import (
 )
 
 // Версию подставляет сборка на GitHub (-ldflags -X main.appVersion=…)
-var appVersion = "1.7.7"
+var appVersion = "1.7.8"
 
 //go:embed web
 var webFS embed.FS
@@ -755,6 +755,7 @@ func startServer() (string, error) {
 	mux.HandleFunc("GET /api/conn", apiAuth(handleConnStatus))
 	mux.HandleFunc("POST /api/bt", apiAuth(handleBT))
 	mux.HandleFunc("POST /api/wifi", apiAuth(handleWifi))
+	mux.HandleFunc("/api/audio", apiAuth(handleAudio))
 	mux.HandleFunc("GET /api/media/cover", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Query().Get("t") != token {
 			http.Error(w, "forbidden", 403)

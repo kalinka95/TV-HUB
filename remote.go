@@ -367,6 +367,7 @@ func startRemoteServer() {
 	}))
 	// Эквалайзер звука компьютера
 	mux.HandleFunc("/r/api/eq", remoteAuth(handleEQ))
+	mux.HandleFunc("/r/api/audio", remoteAuth(handleAudio)) // куда идёт звук
 	// Музыка на пульте: что играет, управление, показать экран музыки на ноутбуке
 	mux.HandleFunc("GET /r/api/media", remoteAuth(func(w http.ResponseWriter, r *http.Request) {
 		st, ok := getMedia()

@@ -664,8 +664,8 @@ function showCover(m, text) {
   if (MU.wantKey !== key) { MU.wantKey = key; MU.wantSince = Date.now(); }
   const wait = Date.now() - MU.wantSince;
   const real = m.coverVer || (m.coverUrl && !/mzstatic\.com/.test(m.coverUrl)); // не запасная обложка из каталога
-  if (!(u && real) && wait < (u ? 1500 : 2500)) return; // ждём настоящую обложку, пока видно прошлый трек
-  const first = !cover.dataset.key; // экран только открыли — показываем без поворота
+  const first = !cover.dataset.key; // экран только открыли — показываем сразу и без поворота
+  if (!first && !(u && real) && wait < (u ? 1500 : 2500)) return; // ждём настоящую обложку, пока видно прошлый трек
   MU.flipKey = key;
   loadCover(u).then(async (x) => {
     if (MU.wantKey !== key || !cover.isConnected) { MU.flipKey = ''; return; } // трек успел смениться
@@ -788,9 +788,28 @@ function coverColors(src) {
 }
 
 const MU_DEF = ['#fc3f1d', '#8b5cf6', '#3b5bdb'];
+
+// HEX-цвет: #F36, F36, #FF3366 → #FF3366 (или '' — не цвет)
+function normHex(s) {
+  const v = String(s || '').trim().replace(/^#/, '');
+  if (/^[0-9a-f]{3}$/i.test(v)) return '#' + v.split('').map((x) => x + x).join('').toUpperCase();
+  if (/^[0-9a-f]{6}$/i.test(v)) return '#' + v.toUpperCase();
+  return '';
+}
+
+// Свои цвета из настроек (до трёх) — вместо цветов обложки. Одного-двух цветов мало
+// для переливов, поэтому добавляем их оттенки.
+function userMusicColors() {
+  const c = ((S.cfg && S.cfg.settings.musicColors) || []).map(normHex).filter(Boolean).slice(0, 3);
+  if (!c.length) return null;
+  if (c.length === 1) return [c[0], `color-mix(in srgb, ${c[0]} 55%, #000)`, `color-mix(in srgb, ${c[0]} 65%, #fff)`];
+  if (c.length === 2) return [c[0], c[1], `color-mix(in srgb, ${c[0]} 50%, ${c[1]})`];
+  return c;
+}
+
 function setMusicColors(cols) {
   const root = document.documentElement.style;
-  const c = cols || MU_DEF;
+  const c = userMusicColors() || cols || MU_DEF;
   root.setProperty('--mu1', c[0]); root.setProperty('--mu2', c[1]); root.setProperty('--mu3', c[2]);
 }
 
@@ -798,7 +817,7 @@ function setMusicColors(cols) {
 function setRing(cols) {
   const d = $('muArt');
   if (!d) return;
-  const c = cols || MU_DEF;
+  const c = userMusicColors() || cols || MU_DEF;
   d.style.setProperty('--r1', c[0]); d.style.setProperty('--r2', c[1]); d.style.setProperty('--r3', c[2]);
 }
 
@@ -851,6 +870,66 @@ function tickMusicProgress() {
 }
 
 // ---------- Дополнительные разделы настроек ----------
+
+// «Цвета музыки»: до трёх своих цветов (HEX) для обводки обложки, свечения и фона
+const MC_PRESETS = [
+  ['Неон', ['#FF2D95', '#7B2FFF', '#00E5FF']],
+  ['Закат', ['#FF5E3A', '#FF2A68', '#FFB347']],
+  ['Океан', ['#0066FF', '#00C2FF', '#00FFC6']],
+  ['Лес', ['#1DB954', '#0B6623', '#A8E063']],
+];
+function musicColorsSection(inner) {
+  const c = S.cfg;
+  const sec = el('div', 's-section');
+  sec.append(el('h2', '', 'Цвета музыки'));
+  sec.append(el('p', 'note', 'Обводка обложки, свечение и фон на экране музыки переливаются цветами обложки трека. Можно задать свои: до трёх цветов в формате HEX, например <b>#FF3366</b>. Пустые поля не учитываются. Удобно вводить с пульта на телефоне (вкладка «Текст»).'));
+  const cur = (c.settings.musicColors || []).map(normHex);
+  const f = el('div', 'form');
+  const fields = [0, 1, 2].map((i) => {
+    const fl = field('Цвет ' + (i + 1), 'mc-' + i, i === 0 ? '#FF3366' : 'необязательно', cur[i] || '');
+    f.append(fl);
+    return fl.querySelector('input');
+  });
+  sec.append(f);
+  // Как это будет выглядеть
+  const prev = el('div', 'mc-preview');
+  const paint = () => {
+    const v = fields.map((i) => normHex(i.value)).filter(Boolean);
+    const cols = v.length === 1 ? [v[0], `color-mix(in srgb, ${v[0]} 55%, #000)`, `color-mix(in srgb, ${v[0]} 65%, #fff)`]
+      : v.length === 2 ? [v[0], v[1], `color-mix(in srgb, ${v[0]} 50%, ${v[1]})`] : v.length ? v : null;
+    prev.style.setProperty('--p1', cols ? cols[0] : '#555');
+    prev.style.setProperty('--p2', cols ? cols[1] : '#777');
+    prev.style.setProperty('--p3', cols ? cols[2] : '#999');
+    prev.textContent = cols ? '' : 'Сейчас — цвета обложки трека';
+    fields.forEach((i) => i.classList.toggle('bad', !!i.value.trim() && !normHex(i.value)));
+  };
+  fields.forEach((i) => i.addEventListener('input', paint));
+  paint();
+  sec.append(prev);
+  const row = el('div', 'seg mc-row');
+  row.append(btn('Сохранить', async () => {
+    const bad = fields.find((i) => i.value.trim() && !normHex(i.value));
+    if (bad) { toast(`«${bad.value.trim()}» — не HEX-цвет. Пример: #FF3366`, 5000); return; }
+    c.settings.musicColors = fields.map((i) => normHex(i.value)).filter(Boolean);
+    await saveCfg();
+    toast(c.settings.musicColors.length ? 'Цвета музыки сохранены' : 'Снова цвета обложки', 3000);
+    keepFocus(renderSettings);
+  }, 'mc-save', 'primary'));
+  row.append(btn('Цвета обложки', async () => {
+    c.settings.musicColors = [];
+    await saveCfg();
+    toast('Снова цвета обложки трека', 3000);
+    keepFocus(renderSettings);
+  }, 'mc-reset'));
+  for (const [name, cols] of MC_PRESETS) {
+    const b = btn(name, () => { cols.forEach((v, i) => { fields[i].value = v; }); paint(); toast(`«${name}»: нажмите «Сохранить»`, 2500); }, 'mc-p-' + name);
+    b.style.setProperty('--p1', cols[0]); b.style.setProperty('--p2', cols[1]); b.style.setProperty('--p3', cols[2]);
+    b.classList.add('mc-chip');
+    row.append(b);
+  }
+  sec.append(row);
+  inner.append(sec);
+}
 
 function renderExtraSettings(inner) {
   const c = S.cfg;
@@ -914,6 +993,8 @@ function renderExtraSettings(inner) {
   wx.append(wf);
   wx.append(results);
   inner.append(wx);
+
+  musicColorsSection(inner);
 
   // Заставка
   const sv = el('div', 's-section');

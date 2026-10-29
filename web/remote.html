@@ -604,8 +604,8 @@ function showCover(m, src, text) {
   if (muWantKey !== key) { muWantKey = key; muWantSince = Date.now(); }
   const wait = Date.now() - muWantSince;
   const real = m.coverVer || (m.coverUrl && !/mzstatic\.com/.test(m.coverUrl)); // не запасная обложка из каталога
-  if (!(src && real) && wait < (src ? 1500 : 2500)) return;
-  const first = !cov.dataset.key;
+  const first = !cov.dataset.key; // пульт только открыли — показываем сразу и без поворота
+  if (!first && !(src && real) && wait < (src ? 1500 : 2500)) return;
   muFlipKey = key;
   loadImg(src).then(async (im) => {
     if (muWantKey !== key) { muFlipKey = ''; return; }

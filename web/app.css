@@ -522,3 +522,12 @@ button, input { font: inherit; color: inherit; }
 .vp-row b.bad { color: #ff8a8a; }
 .vp-cc { font-style: normal; font-size: .9rem; font-weight: 800; background: #ffffff22; border-radius: .35rem; padding: .05rem .4rem; margin-right: .6rem; }
 .vp-tip { font-size: 1.05rem; color: var(--muted); margin: .8rem 0 0; line-height: 1.45; }
+
+/* Настройки: свои цвета музыки */
+.mc-preview { height: 3.2rem; border-radius: 1rem; margin: .4rem 0 .9rem; display: grid; place-items: center; font-size: 1.1rem; color: #fffc;
+  background: linear-gradient(90deg, var(--p1), var(--p2), var(--p3), var(--p1)); box-shadow: 0 .8rem 2.4rem color-mix(in srgb, var(--p1) 35%, transparent); }
+.mc-row { flex-wrap: wrap; }
+.mc-chip { position: relative; padding-left: 3.2rem; }
+.mc-chip::before { content: ""; position: absolute; left: 1rem; top: 50%; width: 1.6rem; height: 1.6rem; margin-top: -.8rem; border-radius: 50%;
+  background: conic-gradient(var(--p1), var(--p2), var(--p3), var(--p1)); }
+.field input.bad { border-color: var(--danger); }

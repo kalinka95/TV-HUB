@@ -25,7 +25,7 @@ import (
 )
 
 // Версию подставляет сборка на GitHub (-ldflags -X main.appVersion=…)
-var appVersion = "1.7.1"
+var appVersion = "1.7.2"
 
 //go:embed web
 var webFS embed.FS
@@ -52,24 +52,25 @@ type App struct {
 }
 
 type Settings struct {
-	Autostart         bool    `json:"autostart"`
-	Fullscreen        bool    `json:"fullscreen"`
-	ResumeLastChannel bool    `json:"resumeLastChannel"`
-	KeepAdSound       bool    `json:"keepAdSound"`    // false = глушить звук на рекламных вставках
-	PhoneRemoteOff    bool    `json:"phoneRemoteOff"` // false = пульт на телефоне включён
-	VPNPath           string  `json:"vpnPath,omitempty"`
-	RunAsAdmin        bool    `json:"runAsAdmin,omitempty"`
-	LatinNames        bool    `json:"latinNames,omitempty"`   // true = оставить названия каналов как в плейлисте
-	EPGURL            string  `json:"epgUrl,omitempty"`       // своя ссылка на телепрограмму (XMLTV)
-	SaverMinutes      int     `json:"saverMinutes,omitempty"` // через сколько минут заставка (0 = 10 мин, -1 = выкл)
-	City              *City   `json:"city,omitempty"`         // город для погоды
-	AutoUpdateOff     bool    `json:"autoUpdateOff,omitempty"`
-	Brightness        int     `json:"brightness,omitempty"` // 10–100, 0 = 100
-	DarkSites         bool    `json:"darkSites,omitempty"`  // Edge затемняет сайты без своей тёмной темы
-	VPNForRu          bool    `json:"vpnForRu,omitempty"`   // true = российские сервисы тоже через VPN
-	VPNHidden         bool    `json:"vpnHidden,omitempty"`
-	EQ                *EQ     `json:"eq,omitempty"`     // эквалайзер (Equalizer APO)
-	OwnVPN            *OwnVPN `json:"ownVpn,omitempty"` // свой VPN (Xray) вместо Happ
+	Autostart         bool     `json:"autostart"`
+	Fullscreen        bool     `json:"fullscreen"`
+	ResumeLastChannel bool     `json:"resumeLastChannel"`
+	KeepAdSound       bool     `json:"keepAdSound"`    // false = глушить звук на рекламных вставках
+	PhoneRemoteOff    bool     `json:"phoneRemoteOff"` // false = пульт на телефоне включён
+	VPNPath           string   `json:"vpnPath,omitempty"`
+	RunAsAdmin        bool     `json:"runAsAdmin,omitempty"`
+	LatinNames        bool     `json:"latinNames,omitempty"`   // true = оставить названия каналов как в плейлисте
+	EPGURL            string   `json:"epgUrl,omitempty"`       // своя ссылка на телепрограмму (XMLTV)
+	SaverMinutes      int      `json:"saverMinutes,omitempty"` // через сколько минут заставка (0 = 10 мин, -1 = выкл)
+	City              *City    `json:"city,omitempty"`         // город для погоды
+	AutoUpdateOff     bool     `json:"autoUpdateOff,omitempty"`
+	Brightness        int      `json:"brightness,omitempty"` // 10–100, 0 = 100
+	DarkSites         bool     `json:"darkSites,omitempty"`  // Edge затемняет сайты без своей тёмной темы
+	VPNForRu          bool     `json:"vpnForRu,omitempty"`   // true = российские сервисы тоже через VPN
+	VPNHidden         bool     `json:"vpnHidden,omitempty"`
+	EQ                *EQ      `json:"eq,omitempty"`          // эквалайзер (Equalizer APO)
+	OwnVPN            *OwnVPN  `json:"ownVpn,omitempty"`      // свой VPN (Xray) вместо Happ
+	MusicColors       []string `json:"musicColors,omitempty"` // свои цвета обводки и фона музыки (до 3, HEX); пусто — цвета обложки
 }
 
 type Config struct {

@@ -538,7 +538,6 @@ function renderMusic() {
     if (S.screen === 'main' && S.tab === 'music') { updateMusic(); vizKeepAlive(); }
     else clearInterval(MU.timer);
   }, 1000);
-  p.append(Object.assign(document.createElement('canvas'), { id: 'muViz', className: 'mu-viz' }));
   vizKeepAlive(true);
   vizStart();
   if (!MU.tick) MU.tick = setInterval(tickMusicProgress, 500);
@@ -670,9 +669,9 @@ async function updateMusic() {
 
 // ---------- Живой визуализатор ----------
 // Компьютер слушает свой звук и ~30 раз в секунду присылает полосы частот (событие viz).
-// Здесь — плавная отрисовка 60 раз в секунду: спектр внизу, обложка и фон в такт басу.
+// Здесь — плавно 60 раз в секунду: обложка, свечение и фон в такт басу.
 
-const VZ = { tgt: new Array(32).fill(0), cur: new Array(32).fill(0), bass: 0, bassCur: 0, at: 0, ping: 0, raf: 0, quiet: 0 };
+const VZ = { bass: 0, bassCur: 0, at: 0, ping: 0, raf: 0 };
 
 function vizKeepAlive(now) {
   if (!now && Date.now() - VZ.ping < 2500) return;
@@ -681,12 +680,11 @@ function vizKeepAlive(now) {
 }
 
 function onVizEvent(ev) {
-  if (Array.isArray(ev.b)) VZ.tgt = ev.b.map((v) => v / 100);
   VZ.bass = (ev.bass || 0) / 100;
   VZ.at = Date.now();
 }
 
-function vizOn() { return S.screen === 'main' && S.tab === 'music' && !SV.on && !!$('muViz'); }
+function vizOn() { return S.screen === 'main' && S.tab === 'music' && !SV.on && !!$('muArt'); }
 
 function vizStart() {
   if (VZ.raf || !MOTION) return;
@@ -695,13 +693,8 @@ function vizStart() {
     VZ.raf = requestAnimationFrame(frame);
     // Давно не было данных (нет звука или компьютер не отвечает) — всё плавно затихает
     const stale = Date.now() - VZ.at > 600;
-    for (let i = 0; i < VZ.cur.length; i++) {
-      const t = stale ? 0 : VZ.tgt[i] || 0;
-      VZ.cur[i] += (t - VZ.cur[i]) * (t > VZ.cur[i] ? 0.45 : 0.18);
-    }
     const bt = stale ? 0 : VZ.bass;
     VZ.bassCur += (bt - VZ.bassCur) * (bt > VZ.bassCur ? 0.5 : 0.12);
-    drawViz();
     beat(VZ.bassCur);
   };
   VZ.raf = requestAnimationFrame(frame);
@@ -720,48 +713,6 @@ function resetBeat() {
   ['muArt', 'muBg'].forEach((id) => { const e = $(id); if (e) e.style.transform = ''; });
   const g = $('muGlow');
   if (g) g.style.opacity = '';
-}
-
-function drawViz() {
-  const c = $('muViz');
-  const w = c.clientWidth, h = c.clientHeight, dpr = devicePixelRatio || 1;
-  if (c.width !== Math.round(w * dpr) || c.height !== Math.round(h * dpr)) { c.width = Math.round(w * dpr); c.height = Math.round(h * dpr); }
-  const g = c.getContext('2d');
-  g.setTransform(dpr, 0, 0, dpr, 0, 0);
-  g.clearRect(0, 0, w, h);
-  const total = VZ.cur.reduce((a, v) => a + v, 0);
-  VZ.quiet = total < 0.3 ? Math.min(1, VZ.quiet + 0.03) : Math.max(0, VZ.quiet - 0.1);
-  c.style.opacity = (1 - VZ.quiet).toFixed(2);
-  if (VZ.quiet >= 1) return;
-  // Бас в центре, высокие — к краям: 64 столбика зеркально
-  const n = VZ.cur.length, bars = n * 2, gap = w * 0.004;
-  const bw = (w - gap * (bars - 1)) / bars;
-  const base = h * 0.72; // линия, от которой растут столбики; ниже — отражение
-  const st = getComputedStyle(document.documentElement);
-  const art = $('muArt');
-  const c1 = ((art && art.style.getPropertyValue('--r1')) || st.getPropertyValue('--mu1')).trim() || '#fc3f1d';
-  const c2 = ((art && art.style.getPropertyValue('--r2')) || st.getPropertyValue('--mu2')).trim() || '#8b5cf6';
-  const grad = g.createLinearGradient(0, base - h * 0.7, 0, base);
-  grad.addColorStop(0, c2);
-  grad.addColorStop(1, c1);
-  for (let i = 0; i < bars; i++) {
-    const k = i < n ? n - 1 - i : i - n;
-    const v = Math.min(1, VZ.cur[k]);
-    const bh = Math.max(2, v * h * 0.7);
-    const x = i * (bw + gap);
-    const r = Math.min(bw / 2, 6);
-    g.globalAlpha = 0.85;
-    g.fillStyle = grad;
-    g.beginPath();
-    g.roundRect(x, base - bh, bw, bh, [r, r, 0, 0]);
-    g.fill();
-    // Отражение на «полу»
-    g.globalAlpha = 0.18;
-    g.beginPath();
-    g.roundRect(x, base + 3, bw, bh * 0.35, [0, 0, r, r]);
-    g.fill();
-  }
-  g.globalAlpha = 1;
 }
 
 // Обложка: из Windows (coverVer) или с сайта Яндекс Музыки (через свой сервер — тогда можно взять цвета)

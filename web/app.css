@@ -339,8 +339,6 @@ button, input { font: inherit; color: inherit; }
 /* ---------- Музыка ---------- */
 #panel-music { justify-content: center; position: relative; }
 #panel-music .mu-wrap { position: relative; z-index: 1; }
-/* Спектр музыки внизу экрана */
-.mu-viz { position: absolute; left: 4rem; right: 4rem; bottom: 0; height: 13rem; width: calc(100% - 8rem); pointer-events: none; z-index: 0; transition: opacity .6s; }
 .mu-glow { position: absolute; inset: -1.5rem; border-radius: 3rem; z-index: -1; opacity: .15; pointer-events: none;
   background: conic-gradient(from var(--ring-ang), var(--r1), var(--r2), var(--r3), var(--r1)); filter: blur(2.6rem); animation: ringSpin 7s linear infinite; }
 #muArt { will-change: transform; }

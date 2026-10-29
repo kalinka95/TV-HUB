@@ -6,7 +6,6 @@ package main
 import (
 	"fmt"
 	"log"
-	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -20,25 +19,6 @@ func appDataDir() string {
 		return d
 	}
 	return filepath.Join(os.TempDir(), "tvhub-dev")
-}
-
-// vizCapture в режиме разработки — придуманная музыка: бас 2 раза в секунду и переливы.
-func vizCapture(onData func(mono []float32, rate int) bool) error {
-	const rate = 48000
-	t := 0
-	for {
-		buf := make([]float32, rate/50)
-		for i := range buf {
-			x := float64(t) / rate
-			kick := math.Exp(-math.Mod(x, 0.5)*14) * math.Sin(2*math.Pi*55*x)
-			buf[i] = float32(0.6*kick + 0.15*math.Sin(2*math.Pi*440*x)*math.Sin(x) + 0.08*math.Sin(2*math.Pi*2200*x)*math.Cos(x*1.3))
-			t++
-		}
-		if !onData(buf, rate) {
-			return nil
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
 }
 
 func signInApp(a App) error { log.Printf("signin %s", a.Target); return nil }

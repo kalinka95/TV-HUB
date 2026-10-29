@@ -1093,7 +1093,6 @@ function listenEvents() {
     else if (ev.type === 'play') onPlayEvent(ev);
     else if (ev.type === 'tv') tvNow();
     else if (ev.type === 'appShown') hideLaunch(500);
-    else if (ev.type === 'viz') onVizEvent(ev);
     else if (ev.type === 'launch' && ev.app) { if ($('launch').classList.contains('hidden')) { closeSearch(); hideSaver(); showLaunch(ev.app); } }
     else if (ev.type === 'key') {
       const key = KEYS[ev.key] || ev.key;

@@ -339,10 +339,15 @@ button, input { font: inherit; color: inherit; }
 /* ---------- Музыка ---------- */
 #panel-music { justify-content: center; position: relative; }
 #panel-music .mu-wrap { position: relative; z-index: 1; }
-.mu-glow { position: absolute; inset: -1.5rem; border-radius: 3rem; z-index: -1; opacity: .15; pointer-events: none;
-  background: conic-gradient(from var(--ring-ang), var(--r1), var(--r2), var(--r3), var(--r1)); filter: blur(2.6rem); animation: ringSpin 7s linear infinite; }
-#muArt { will-change: transform; }
-#muBg { will-change: transform; }
+.mu-glow { position: absolute; inset: -1.5rem; border-radius: 3rem; z-index: -1; opacity: .12; pointer-events: none;
+  background: conic-gradient(from var(--ring-ang), var(--r1), var(--r2), var(--r3), var(--r1)); filter: blur(2.6rem); animation: ringSpin 7s linear infinite;
+  transition: opacity .9s ease; }
+/* Трек играет — обложка выезжает вперёд: крупнее, тень глубже, свечение ярче. Пауза — назад */
+.mu-art { transition: transform .9s cubic-bezier(.2,.8,.2,1); }
+.mu-art .mu-door { transition: box-shadow .9s ease; }
+.mu-art.playing { transform: scale(1.08) translateY(-.4rem); }
+.mu-art.playing .mu-glow { opacity: .55; }
+.mu-art.playing .mu-door { box-shadow: 0 2rem 6rem color-mix(in srgb, var(--r1) 50%, transparent), 0 3.5rem 7rem #000a; }
 .mu-wrap { display: flex; gap: 4rem; align-items: center; padding: 0 6rem 6rem; }
 .mu-cover { width: 30rem; height: 30rem; border-radius: 1.6rem; flex: none; overflow: hidden; display: grid; place-items: center;
   background: linear-gradient(135deg, #fc3f1d, #8b5cf6); box-shadow: 0 2rem 5rem #000a; }

@@ -158,8 +158,10 @@ header { display: flex; align-items: center; gap: 10px; height: 44px; flex: none
 .mu-cover { width: min(66vw, 34vh); aspect-ratio: 1; border-radius: 22px; overflow: hidden; display: grid; place-items: center;
   background: linear-gradient(135deg, #fc3f1d, #8b5cf6); box-shadow: 0 18px 50px #0009; font-size: 80px; margin-bottom: 10px; }
 .mu-cover img { width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
-.mu-cover { -webkit-touch-callout: none; user-select: none; -webkit-user-select: none; transition: transform .25s; }
-.mu-cover.hold { transform: scale(.94); }
+.mu-cover { -webkit-touch-callout: none; user-select: none; -webkit-user-select: none; transition: transform .9s cubic-bezier(.2,.8,.2,1), box-shadow .9s ease; }
+/* Трек играет — обложка выезжает вперёд, пауза — возвращается на место */
+.mu-cover.playing { transform: scale(1.06); box-shadow: 0 28px 70px #000b; }
+.mu-cover.hold { transform: scale(.94); transition-duration: .25s; }
 .mu-state { font-size: 12px; color: var(--muted); letter-spacing: .1em; text-transform: uppercase; font-weight: 700; }
 .mu-title { font-size: 22px; font-weight: 800; line-height: 1.2; padding: 0 8px; }
 .mu-artist { font-size: 15px; color: #c7cede; }
@@ -544,7 +546,7 @@ async function loadMusic() {
   const text = () => { $('muTitle').textContent = m.title; $('muArtist').textContent = m.artist || ''; };
   if (m.title) {
     $('muState').textContent = playing ? 'Сейчас играет' : 'На паузе';
-    if (!(src && cov.dataset.want === src && cov.dataset.src !== src) && !(src && cov.dataset.want !== src)) text();
+    showCover(m, src, text);
   } else {
     $('muState').textContent = 'Ничего не играет';
     $('muTitle').textContent = 'Включите музыку';
@@ -553,36 +555,65 @@ async function loadMusic() {
   const info = $('muInfo');
   info.textContent = !m.title && d.startInfo ? d.startInfo : '';
   info.classList.toggle('hidden', !info.textContent);
-  if (src && cov.dataset.want !== src) {
-    // Сначала загружаем картинку, потом показываем — без пустого квадрата
-    cov.dataset.want = src;
-    const im = new Image();
-    let done = false;
-    const swap = () => {
-      if (done || cov.dataset.want !== src) return;
-      done = true;
-      flipCover(() => {
-        cov.dataset.src = src; // название меняется вместе с обложкой — в середине поворота
-        if (im.complete && im.naturalWidth) {
-          cov.innerHTML = '';
-          cov.append(im);
-          $('muBgImg').style.backgroundImage = `url("${src}")`;
-          $('muBgImg').classList.add('on');
-        }
-        if (m.title) text();
-      });
-    };
-    im.onload = swap;
-    im.onerror = swap;
-    setTimeout(swap, 2500);
-    im.src = src;
-  } else if (!src && cov.dataset.src) {
-    cov.dataset.want = '';
-    cov.dataset.src = ''; cov.innerHTML = '<span>♪</span>'; $('muBgImg').classList.remove('on');
-  }
   $('muPlayIco').setAttribute('d', playing ? 'M8 5v14M16 5v14' : 'M7 5l12 7-12 7z');
+  cov.classList.toggle('playing', playing && !!m.title);
   showLike(m.title ? m.liked : undefined);
   tickMusic();
+}
+// Обложка трека. Поворот — ровно один на смену трека (как на телевизоре): ждём настоящую
+// обложку нового трека и только потом поворачиваем; пока ждём — видно прошлый трек.
+// Другая картинка для того же трека меняется без поворота.
+let muWantKey = '', muWantSince = 0, muFlipKey = '', muQuiet = '';
+function placeCover(cov, im, src) {
+  if (im) {
+    cov.innerHTML = '';
+    cov.append(im);
+    $('muBgImg').style.backgroundImage = `url("${src}")`;
+    $('muBgImg').classList.add('on');
+  } else {
+    cov.innerHTML = '<span>♪</span>';
+    $('muBgImg').classList.remove('on');
+  }
+}
+function loadImg(src) {
+  if (!src) return Promise.resolve(null);
+  return new Promise((res) => {
+    const im = new Image();
+    let done = false;
+    const fin = () => { if (!done) { done = true; res(im.complete && im.naturalWidth > 0 ? im : null); } };
+    im.onload = fin; im.onerror = fin; setTimeout(fin, 3000);
+    im.src = src;
+  });
+}
+function showCover(m, src, text) {
+  const cov = $('muCover');
+  const key = m.title + '|' + (m.artist || '');
+  if (cov.dataset.key === key) {
+    if (!muFlipKey) text();
+    if (src && src !== cov.dataset.src && muQuiet !== src) {
+      muQuiet = src;
+      loadImg(src).then((im) => {
+        if (cov.dataset.key !== key || muQuiet !== src) return;
+        muQuiet = '';
+        if (im) { cov.dataset.src = src; placeCover(cov, im, src); }
+      });
+    }
+    return;
+  }
+  if (muFlipKey === key) return;
+  if (muWantKey !== key) { muWantKey = key; muWantSince = Date.now(); }
+  const wait = Date.now() - muWantSince;
+  const real = m.coverVer || (m.coverUrl && !/mzstatic\.com/.test(m.coverUrl)); // не запасная обложка из каталога
+  if (!(src && real) && wait < (src ? 1500 : 2500)) return;
+  const first = !cov.dataset.key;
+  muFlipKey = key;
+  loadImg(src).then(async (im) => {
+    if (muWantKey !== key) { muFlipKey = ''; return; }
+    const apply = () => { cov.dataset.key = key; cov.dataset.src = src; placeCover(cov, im, src); text(); };
+    if (first) apply();
+    else await flipCover(apply);
+    muFlipKey = '';
+  });
 }
 // Смена трека: обложка поворачивается, как дверь вокруг середины (как на телевизоре)
 let muDir = 0;

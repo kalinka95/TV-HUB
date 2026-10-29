@@ -25,7 +25,7 @@ import (
 )
 
 // Версию подставляет сборка на GitHub (-ldflags -X main.appVersion=…)
-var appVersion = "1.7.0"
+var appVersion = "1.7.1"
 
 //go:embed web
 var webFS embed.FS
@@ -750,11 +750,6 @@ func startServer() (string, error) {
 		}
 		res["ok"] = true
 		writeJSON(w, res)
-	}))
-	// Визуализатор: экран музыки раз в пару секунд напоминает, что он открыт
-	mux.HandleFunc("POST /api/viz", apiAuth(func(w http.ResponseWriter, r *http.Request) {
-		vizWant()
-		w.WriteHeader(204)
 	}))
 	mux.HandleFunc("GET /api/media/cover", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Query().Get("t") != token {

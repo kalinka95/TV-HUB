@@ -535,11 +535,9 @@ function renderMusic() {
   updateMusic();
   clearInterval(MU.timer);
   MU.timer = setInterval(() => {
-    if (S.screen === 'main' && S.tab === 'music') { updateMusic(); vizKeepAlive(); }
+    if (S.screen === 'main' && S.tab === 'music') updateMusic();
     else clearInterval(MU.timer);
   }, 1000);
-  vizKeepAlive(true);
-  vizStart();
   if (!MU.tick) MU.tick = setInterval(tickMusicProgress, 500);
 }
 
@@ -625,38 +623,7 @@ async function updateMusic() {
       title.textContent = m.title;
       $('muArtist').textContent = [m.artist, m.album && m.album !== m.title ? m.album : ''].filter(Boolean).join(' — ');
     };
-    const cover = $('muCover');
-    const u = coverURL(m);
-    if (u && cover.dataset.u !== u) {
-      cover.dataset.u = u;
-      const im = new Image();
-      let done = false;
-      MU.pendingU = u;
-      // Цвета обводки нужны к середине поворота — ждём их недолго
-      const cols = Promise.race([coverColors(u), new Promise((res) => setTimeout(() => res(undefined), 1500))]);
-      const swap = async () => {
-        if (done || cover.dataset.u !== u) return;
-        done = true;
-        const c = await cols;
-        if (cover.dataset.u !== u) return;
-        flipCover(() => {
-          MU.pendingU = '';
-          if (im.complete && im.naturalWidth) { cover.innerHTML = ''; cover.append(im); }
-          text();
-          if (c !== undefined) setRing(c);
-        });
-      };
-      im.onload = swap;
-      im.onerror = swap;
-      setTimeout(swap, 2500);
-      im.src = u;
-      coverColors(u).then((c) => { if (cover.dataset.u === u) { setMusicColors(c); if (!MU.flipping) setRing(c); } });
-    } else if (!u && cover.dataset.u) {
-      cover.dataset.u = '';
-      flipCover(() => { cover.innerHTML = '<span class="mu-note">♪</span>'; text(); setRing(null); });
-      setMusicColors(null);
-    }
-    else if (MU.pendingU !== u) text(); // пока обложка грузится — оставляем прошлое название
+    showCover(m, text);
   } else {
     $('muKicker').textContent = r.available === false ? 'Музыка' : 'Сейчас ничего не играет';
     title.textContent = r.available === false ? 'Не получается узнать, что играет' : 'Включите музыку';
@@ -664,55 +631,76 @@ async function updateMusic() {
   }
   const ico = document.getElementById('muPlayIco');
   if (ico) ico.setAttribute('d', playing ? 'M8 5v14M16 5v14' : 'M7 5l12 7-12 7z');
+  // Играет — обложка выезжает вперёд, пауза — возвращается на место
+  const art = $('muArt');
+  if (art) art.classList.toggle('playing', !!(playing && m.title));
   tickMusicProgress();
 }
 
-// ---------- Живой визуализатор ----------
-// Компьютер слушает свой звук и ~30 раз в секунду присылает полосы частот (событие viz).
-// Здесь — плавно 60 раз в секунду: обложка, свечение и фон в такт басу.
-
-const VZ = { bass: 0, bassCur: 0, at: 0, ping: 0, raf: 0 };
-
-function vizKeepAlive(now) {
-  if (!now && Date.now() - VZ.ping < 2500) return;
-  VZ.ping = Date.now();
-  api.post('/api/viz', {}).catch(() => {});
+// Обложка трека. Поворот «дверью» — ровно один на смену трека: Windows присылает настоящую
+// обложку чуть позже названия (а сначала — запасную или никакую), поэтому ждём её и только
+// потом поворачиваем. Другая картинка для того же трека меняется без поворота.
+function showCover(m, text) {
+  const cover = $('muCover');
+  if (!cover) return;
+  const key = m.title + '|' + (m.artist || '');
+  const u = coverURL(m);
+  if (cover.dataset.key === key) {
+    if (!MU.flipKey) text();
+    if (u && u !== cover.dataset.u && MU.quietU !== u) {
+      MU.quietU = u;
+      loadCover(u).then((x) => {
+        if (cover.dataset.key !== key || MU.quietU !== u) return;
+        MU.quietU = '';
+        cover.dataset.u = u;
+        if (x.im) { cover.innerHTML = ''; cover.append(x.im); }
+        setRing(x.cols);
+        setMusicColors(x.cols);
+      });
+    }
+    return;
+  }
+  if (MU.flipKey === key) return; // уже поворачиваем к этому треку
+  if (MU.wantKey !== key) { MU.wantKey = key; MU.wantSince = Date.now(); }
+  const wait = Date.now() - MU.wantSince;
+  const real = m.coverVer || (m.coverUrl && !/mzstatic\.com/.test(m.coverUrl)); // не запасная обложка из каталога
+  if (!(u && real) && wait < (u ? 1500 : 2500)) return; // ждём настоящую обложку, пока видно прошлый трек
+  const first = !cover.dataset.key; // экран только открыли — показываем без поворота
+  MU.flipKey = key;
+  loadCover(u).then(async (x) => {
+    if (MU.wantKey !== key || !cover.isConnected) { MU.flipKey = ''; return; } // трек успел смениться
+    const apply = () => {
+      cover.dataset.key = key;
+      cover.dataset.u = u;
+      if (x.im) { cover.innerHTML = ''; cover.append(x.im); } else cover.innerHTML = '<span class="mu-note">♪</span>';
+      text();
+      setRing(x.cols);
+    };
+    setMusicColors(x.cols);
+    if (first) apply();
+    else await flipCover(apply);
+    MU.flipKey = '';
+  });
 }
 
-function onVizEvent(ev) {
-  VZ.bass = (ev.bass || 0) / 100;
-  VZ.at = Date.now();
-}
-
-function vizOn() { return S.screen === 'main' && S.tab === 'music' && !SV.on && !!$('muArt'); }
-
-function vizStart() {
-  if (VZ.raf || !MOTION) return;
-  const frame = () => {
-    if (!vizOn()) { VZ.raf = 0; resetBeat(); return; }
-    VZ.raf = requestAnimationFrame(frame);
-    // Давно не было данных (нет звука или компьютер не отвечает) — всё плавно затихает
-    const stale = Date.now() - VZ.at > 600;
-    const bt = stale ? 0 : VZ.bass;
-    VZ.bassCur += (bt - VZ.bassCur) * (bt > VZ.bassCur ? 0.5 : 0.12);
-    beat(VZ.bassCur);
-  };
-  VZ.raf = requestAnimationFrame(frame);
-}
-
-// Обложка с обводкой подпрыгивает на басах, свечение вокруг неё и фон вспыхивают
-function beat(b) {
-  const k = Math.max(0, b - 0.25) / 0.75; // тихий бас не трогает картинку
-  const cov = $('muArt'), glow = $('muGlow'), bg = $('muBg');
-  if (cov) cov.style.transform = `scale(${(1 + k * 0.05).toFixed(4)})`;
-  if (glow) glow.style.opacity = (0.15 + k * 0.85).toFixed(3);
-  if (bg) bg.style.transform = `scale(${(1 + k * 0.07).toFixed(4)})`;
-}
-
-function resetBeat() {
-  ['muArt', 'muBg'].forEach((id) => { const e = $(id); if (e) e.style.transform = ''; });
-  const g = $('muGlow');
-  if (g) g.style.opacity = '';
+// loadCover загружает картинку и её цвета (недолго ждём, чтобы не задерживать поворот).
+function loadCover(u) {
+  if (!u) return Promise.resolve({ im: null, cols: null });
+  return new Promise((res) => {
+    const im = new Image();
+    let done = false;
+    const fin = async () => {
+      if (done) return;
+      done = true;
+      const ok = im.complete && im.naturalWidth > 0;
+      const cols = ok ? await Promise.race([coverColors(u), new Promise((r) => setTimeout(() => r(null), 1500))]) : null;
+      res({ im: ok ? im : null, cols });
+    };
+    im.onload = fin;
+    im.onerror = fin;
+    setTimeout(fin, 3000);
+    im.src = u;
+  });
 }
 
 // Обложка: из Windows (coverVer) или с сайта Яндекс Музыки (через свой сервер — тогда можно взять цвета)

@@ -407,7 +407,8 @@ func runPlatform() {
 	}
 	defer wv.Destroy()
 	hwnd = uintptr(wv.Window())
-	wv.Init(noPopupsJS) // сайты внутри TVHub не открывают новых окон
+	wv.Bind("tvhubInsideURL", insideReportURL) // сайт сообщает, на какой он странице
+	wv.Init(noPopupsJS)                        // сайты внутри TVHub не открывают новых окон
 
 	if cfg.Settings.Fullscreen {
 		setFullscreen(true)
@@ -503,6 +504,12 @@ func openInside(a App) error {
 	insideID = a.ID
 	insideMu.Unlock()
 	target := a.Target
+	// Возвращаемся туда, где остановились (например, к странице фильма), если это было недавно
+	cfgMu.Lock()
+	if r, ok := cfg.InsideLast[a.ID]; ok && time.Since(r.At) < 12*time.Hour && sameSite(r.URL, a.Target) {
+		target = r.URL
+	}
+	cfgMu.Unlock()
 	go func() {
 		// Российский сервис: встроенный браузер ходит в интернет так же, как Windows, — и через
 		// прокси VPN тоже. Поэтому VPN выключаем при любом его режиме, если трафик идёт через него.
@@ -522,6 +529,39 @@ func openInside(a App) error {
 		})
 	}()
 	return nil
+}
+
+var insideSaved time.Time
+
+// insideReportURL — сайт внутри TVHub сообщил свой адрес. Запоминаем, если это тот же сайт,
+// что открыли (входы через Яндекс ID и другие сайты не запоминаем).
+func insideReportURL(u string) {
+	insideMu.Lock()
+	id := insideID
+	insideMu.Unlock()
+	if id == "" || !(strings.HasPrefix(u, "https://") || strings.HasPrefix(u, "http://")) || len(u) > 4096 {
+		return
+	}
+	cfgMu.Lock()
+	defer cfgMu.Unlock()
+	var target string
+	for _, a := range cfg.Apps {
+		if a.ID == id {
+			target = a.Target
+		}
+	}
+	if target == "" || !sameSite(u, target) {
+		return
+	}
+	if cfg.InsideLast == nil {
+		cfg.InsideLast = map[string]InsideResume{}
+	}
+	old := cfg.InsideLast[id]
+	cfg.InsideLast[id] = InsideResume{URL: u, At: time.Now()}
+	if old.URL != u || time.Since(insideSaved) > time.Minute { // не пишем файл настроек каждые 4 секунды
+		insideSaved = time.Now()
+		saveConfigLocked()
+	}
 }
 
 func insideOpen() bool {
@@ -577,4 +617,15 @@ const noPopupsJS = `(() => {
     if (a && a.href && !same(a.target) && !a.hasAttribute('download')) a.target = '_self';
   }, true);
   document.addEventListener('submit', (e) => { const f = e.target; if (f && !same(f.target)) f.target = '_self'; }, true);
+  // Сообщаем TVHub, на какой мы странице: после «Домой» он вернёт сюда, например к фильму
+  if (window.top === window) {
+    const report = () => { try { if (window.tvhubInsideURL) window.tvhubInsideURL(location.href); } catch (e) {} };
+    for (const k of ['pushState', 'replaceState']) {
+      const f = history[k];
+      history[k] = function () { const r = f.apply(this, arguments); setTimeout(report, 50); return r; };
+    }
+    addEventListener('popstate', report);
+    addEventListener('load', report);
+    setInterval(report, 4000);
+  }
 })();`

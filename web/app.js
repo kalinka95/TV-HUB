@@ -561,6 +561,13 @@ function appMenu(app) {
     { label: 'Правее →', act: () => { moveApp(app, 1); rerenderMain(k); } },
   ];
   // Сайты открываются внутри TVHub; если сайту это не подходит — можно открывать в отдельном Edge
+  if (app.type === 'web' && !app.userAgent && !app.inEdge) {
+    items.push({ label: 'Открыть с главной страницы', act: async () => {
+      lastAppId = app.id; showLaunch(app);
+      const r = await api.post('/api/launch', { id: app.id, fresh: true }).catch((e) => ({ ok: false, error: e.message }));
+      if (!r.ok) { hideLaunch(0); toast('Не удалось открыть: ' + r.error, 5000); }
+    } });
+  }
   if (app.type === 'web' && !app.userAgent) {
     items.push({ label: app.inEdge ? 'Открывать в Edge: вкл' : 'Открывать в Edge: выкл', act: () => {
       app.inEdge = !app.inEdge; saveCfg();

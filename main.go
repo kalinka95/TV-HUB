@@ -25,7 +25,7 @@ import (
 )
 
 // Версию подставляет сборка на GitHub (-ldflags -X main.appVersion=…)
-var appVersion = "1.6.1"
+var appVersion = "1.6.2"
 
 //go:embed web
 var webFS embed.FS
@@ -73,18 +73,19 @@ type Settings struct {
 }
 
 type Config struct {
-	Playlists        []Playlist      `json:"playlists"`
-	ActivePlaylist   string          `json:"activePlaylist"`
-	Apps             []App           `json:"apps"`
-	Favorites        []string        `json:"favorites"`
-	LastChannel      string          `json:"lastChannel"`
-	Settings         Settings        `json:"settings"`
-	RemoteKey        string          `json:"remoteKey"` // секрет в ссылке пульта на телефоне
-	Reminders        []Reminder      `json:"reminders,omitempty"`
-	YaMusicAdded     bool            `json:"yaMusicAdded,omitempty"`
-	ClearCity        bool            `json:"clearCity,omitempty"`        // только в запросе: убрать город
-	Likes            map[string]bool `json:"likes,omitempty"`            // треки, отмеченные «Мне нравится» через TVHub
-	DeletedPlaylists []Playlist      `json:"deletedPlaylists,omitempty"` // недавно удалённые — их можно вернуть
+	Playlists        []Playlist              `json:"playlists"`
+	ActivePlaylist   string                  `json:"activePlaylist"`
+	Apps             []App                   `json:"apps"`
+	Favorites        []string                `json:"favorites"`
+	LastChannel      string                  `json:"lastChannel"`
+	Settings         Settings                `json:"settings"`
+	RemoteKey        string                  `json:"remoteKey"` // секрет в ссылке пульта на телефоне
+	Reminders        []Reminder              `json:"reminders,omitempty"`
+	YaMusicAdded     bool                    `json:"yaMusicAdded,omitempty"`
+	ClearCity        bool                    `json:"clearCity,omitempty"`        // только в запросе: убрать город
+	Likes            map[string]bool         `json:"likes,omitempty"`            // треки, отмеченные «Мне нравится» через TVHub
+	DeletedPlaylists []Playlist              `json:"deletedPlaylists,omitempty"` // недавно удалённые — их можно вернуть
+	InsideLast       map[string]InsideResume `json:"insideLast,omitempty"`       // где остановились на сайтах внутри TVHub
 }
 
 const tvUA = "Mozilla/5.0 (SMART-TV; LINUX; Tizen 6.0) AppleWebKit/537.36 (KHTML, like Gecko) 85.0.4183.93/6.0 TV Safari/537.36"
@@ -574,6 +575,7 @@ func handleSaveConfig(w http.ResponseWriter, r *http.Request) {
 	c.Settings.EQ = cfg.Settings.EQ
 	c.Settings.OwnVPN = cfg.Settings.OwnVPN // меняется только через /api/ownvpn
 	c.Likes = cfg.Likes
+	c.InsideLast = cfg.InsideLast
 	c.DeletedPlaylists = deletedPlaylists(cfg.DeletedPlaylists, cfg.Playlists, c.Playlists)
 	if c.Settings.City == nil { // город сбрасывается только явно, не из-за устаревшей копии настроек
 		c.Settings.City = cfg.Settings.City
@@ -636,8 +638,16 @@ func displayChannels(ch []Channel) []Channel {
 }
 
 func handleLaunch(w http.ResponseWriter, r *http.Request) {
-	var req struct{ ID string }
+	var req struct {
+		ID    string
+		Fresh bool // открыть сайт с главной страницы, а не там, где остановились
+	}
 	json.NewDecoder(r.Body).Decode(&req)
+	if req.Fresh {
+		cfgMu.Lock()
+		delete(cfg.InsideLast, req.ID)
+		cfgMu.Unlock()
+	}
 	cfgMu.Lock()
 	var app *App
 	for i := range cfg.Apps {
@@ -873,4 +883,10 @@ func anyVPNStatus() map[string]any {
 		}
 	}
 	return map[string]any{"found": true, "own": true, "name": "TVHub", "server": name, "on": o["on"], "running": o["want"], "busy": o["busy"], "error": o["error"]}
+}
+
+// InsideResume — страница сайта внутри TVHub, на которой остановились (чтобы вернуться к фильму).
+type InsideResume struct {
+	URL string    `json:"url"`
+	At  time.Time `json:"at"`
 }

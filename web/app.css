@@ -75,7 +75,7 @@ button, input { font: inherit; color: inherit; }
 .row-title { font-size: 1.45rem; font-weight: 600; margin: 0 4.5rem .2rem; color: var(--text); }
 .row-track { display: flex; gap: 1.4rem; padding: 1rem 4.5rem; overflow: hidden; scroll-padding: 0 4.5rem; }
 
-.f { outline: none; transition: transform .14s ease, box-shadow .14s ease, background .14s; }
+.f { outline: none; transition: transform .26s cubic-bezier(.2,.8,.2,1), box-shadow .26s cubic-bezier(.2,.8,.2,1), background .2s, color .2s; }
 .f.focus { transform: scale(var(--focus-scale)); box-shadow: 0 0 0 .3rem var(--text), 0 1.2rem 3rem #000c; z-index: 1; }
 
 .card {
@@ -440,7 +440,15 @@ button, input { font: inherit; color: inherit; }
   75% { transform: translate(-36%, -10%) scale(1.3); }
   100% { transform: translate(18%, -20%) scale(.85); }
 }
-.mu-cover { transition: box-shadow 1.5s ease; }
+/* Обложка — «дверь» с цветной обводкой: при смене трека поворачивается вокруг середины */
+@property --ring-ang { syntax: '<angle>'; inherits: false; initial-value: 0deg; }
+.mu-door { position: relative; flex: none; padding: .45rem; border-radius: 2.05rem; --r1: #fc3f1d; --r2: #8b5cf6; --r3: #3b5bdb;
+  background: conic-gradient(from var(--ring-ang), var(--r1), var(--r2), var(--r3), var(--r1));
+  box-shadow: 0 2rem 6rem color-mix(in srgb, var(--r1) 42%, transparent), 0 2rem 5rem #0008;
+  animation: ringSpin 7s linear infinite; will-change: transform; backface-visibility: hidden; }
+@keyframes ringSpin { to { --ring-ang: 360deg; } }
+.mu-door .mu-cover { box-shadow: none; }
+@media (prefers-reduced-motion: reduce) { .mu-door { animation: none; } }
 #main.music-on .backdrop::after { background: linear-gradient(0deg, #0a0c11b3 0%, transparent 55%), radial-gradient(ellipse at 22% 45%, #0a0c1166, transparent 60%); }
 #main.music-on .mu-bg { inset: -10%; }
 #main.music-on .mu-bg.on { opacity: .75; }

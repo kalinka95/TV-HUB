@@ -501,7 +501,7 @@ function renderMusic() {
   const p = $('panel-music');
   p.innerHTML = '';
   const wrap = el('div', 'mu-wrap');
-  wrap.innerHTML = `<div class="mu-cover" id="muCover"><span class="mu-note">♪</span></div>
+  wrap.innerHTML = `<div class="mu-door" id="muDoor"><div class="mu-cover" id="muCover"><span class="mu-note">♪</span></div></div>
     <div class="mu-info">
       <div class="mu-kicker" id="muKicker">Музыка</div>
       <div class="mu-title" id="muTitle">Сейчас ничего не играет</div>
@@ -549,6 +549,7 @@ function renderMusic() {
 
 async function mediaCmd(action, extra) {
   let r = null;
+  if (action === 'next' || action === 'prev') MU.dir = action === 'prev' ? -1 : 1;
   try {
     r = await api.post('/api/media', { action, ...extra });
     if (r.error) toast(r.error, 5000);
@@ -635,13 +636,30 @@ async function updateMusic() {
       const im = new Image();
       let done = false;
       MU.pendingU = u;
-      const swap = () => { if (done || cover.dataset.u !== u) return; done = true; MU.pendingU = ''; if (im.complete && im.naturalWidth) { cover.innerHTML = ''; cover.append(im); } text(); };
+      // Цвета обводки нужны к середине поворота — ждём их недолго
+      const cols = Promise.race([coverColors(u), new Promise((res) => setTimeout(() => res(undefined), 1500))]);
+      const swap = async () => {
+        if (done || cover.dataset.u !== u) return;
+        done = true;
+        const c = await cols;
+        if (cover.dataset.u !== u) return;
+        flipCover(() => {
+          MU.pendingU = '';
+          if (im.complete && im.naturalWidth) { cover.innerHTML = ''; cover.append(im); }
+          text();
+          if (c !== undefined) setRing(c);
+        });
+      };
       im.onload = swap;
       im.onerror = swap;
       setTimeout(swap, 2500);
       im.src = u;
-      coverColors(u).then((cols) => { if (cover.dataset.u === u) setMusicColors(cols); });
-    } else if (!u && cover.dataset.u) { cover.dataset.u = ''; cover.innerHTML = '<span class="mu-note">♪</span>'; setMusicColors(null); text(); }
+      coverColors(u).then((c) => { if (cover.dataset.u === u) { setMusicColors(c); if (!MU.flipping) setRing(c); } });
+    } else if (!u && cover.dataset.u) {
+      cover.dataset.u = '';
+      flipCover(() => { cover.innerHTML = '<span class="mu-note">♪</span>'; text(); setRing(null); });
+      setMusicColors(null);
+    }
     else if (MU.pendingU !== u) text(); // пока обложка грузится — оставляем прошлое название
   } else {
     $('muKicker').textContent = r.available === false ? 'Музыка' : 'Сейчас ничего не играет';
@@ -737,12 +755,48 @@ function coverColors(src) {
   });
 }
 
+const MU_DEF = ['#fc3f1d', '#8b5cf6', '#3b5bdb'];
 function setMusicColors(cols) {
   const root = document.documentElement.style;
-  const def = ['#fc3f1d', '#8b5cf6', '#3b5bdb'];
-  const c = cols || def;
+  const c = cols || MU_DEF;
   root.setProperty('--mu1', c[0]); root.setProperty('--mu2', c[1]); root.setProperty('--mu3', c[2]);
-  $('muCover').style.boxShadow = cols ? `0 2rem 6rem color-mix(in srgb, ${c[0]} 45%, transparent)` : '';
+}
+
+// Обводка обложки — в цветах обложки
+function setRing(cols) {
+  const d = $('muDoor');
+  if (!d) return;
+  const c = cols || MU_DEF;
+  d.style.setProperty('--r1', c[0]); d.style.setProperty('--r2', c[1]); d.style.setProperty('--r3', c[2]);
+}
+
+// Обложка поворачивается, как дверь вокруг середины: ребром к нам — меняем картинку и обводку
+// и доворачиваем. «Следующий» крутит в одну сторону, «предыдущий» — в другую.
+async function flipCover(apply) {
+  const d = $('muDoor');
+  if (!d || !MOTION || !d.animate) { apply(); return; }
+  const s = MU.dir === -1 ? -1 : 1;
+  MU.dir = 0;
+  MU.flipping = true;
+  let applied = false;
+  const once = () => { if (!applied) { applied = true; apply(); } };
+  try {
+    await d.animate([
+      { transform: 'perspective(140rem) rotateY(0deg)', filter: 'brightness(1)' },
+      { transform: `perspective(140rem) rotateY(${-90 * s}deg)`, filter: 'brightness(.55)' },
+    ], { duration: 300, easing: 'cubic-bezier(.55,0,.9,.45)', fill: 'forwards' }).finished;
+    once();
+    await d.animate([
+      { transform: `perspective(140rem) rotateY(${90 * s}deg)`, filter: 'brightness(.55)' },
+      { transform: `perspective(140rem) rotateY(${-6 * s}deg)`, filter: 'brightness(1.05)', offset: 0.75 },
+      { transform: 'perspective(140rem) rotateY(0deg)', filter: 'brightness(1)' },
+    ], { duration: 520, easing: 'cubic-bezier(.2,.75,.3,1)' }).finished;
+  } catch (e) {
+    once();
+  } finally {
+    d.getAnimations().forEach((a) => { if (!(a instanceof CSSAnimation)) a.cancel(); }); // вращение обводки не трогаем
+    MU.flipping = false;
+  }
 }
 
 // Переливающийся фон в цветах обложки — только на вкладке «Музыка»

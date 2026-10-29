@@ -99,30 +99,70 @@ function focusables(scope) {
   return [...scope.querySelectorAll('.f')].filter((e) => e.offsetParent !== null && !e.disabled);
 }
 
+// ---------- Плавность ----------
+
+const MOTION = !matchMedia('(prefers-reduced-motion: reduce)').matches;
+const EASE = 'cubic-bezier(.2,.8,.2,1)';
+
+// Плавная прокрутка к цели. Если нажать ещё раз, пока список едет, он плавно поедет к новой цели.
+function smoothScroll(p, left, top) {
+  left = Math.max(0, Math.min(left, p.scrollWidth - p.clientWidth));
+  top = Math.max(0, Math.min(top, p.scrollHeight - p.clientHeight));
+  if (!MOTION) { p.scrollLeft = left; p.scrollTop = top; return; }
+  const a = p._scroll || (p._scroll = {});
+  if (!a.raf && Math.abs(left - p.scrollLeft) < 1 && Math.abs(top - p.scrollTop) < 1) return;
+  Object.assign(a, { fx: p.scrollLeft, fy: p.scrollTop, tx: left, ty: top, t0: performance.now() });
+  if (a.raf) return;
+  const step = (now) => {
+    const k = Math.min(1, (now - a.t0) / 320);
+    const e = 1 - Math.pow(1 - k, 3);
+    p.scrollLeft = a.fx + (a.tx - a.fx) * e;
+    p.scrollTop = a.fy + (a.ty - a.fy) * e;
+    a.raf = k < 1 ? requestAnimationFrame(step) : 0;
+  };
+  a.raf = requestAnimationFrame(step);
+}
+
+// Мягкое появление: элемент выезжает на dx/dy rem и проявляется
+function slideIn(node, dx = 0, dy = 0, ms = 340) {
+  if (!MOTION || !node || !node.animate) return;
+  node.animate([{ opacity: 0, transform: `translate(${dx}rem, ${dy}rem)` }, { opacity: 1, transform: 'none' }], { duration: ms, easing: EASE });
+}
+
 function ensureVisible(node) {
+  // Прокрутка внутренних списков ещё не случилась (она плавная), поэтому для внешних
+  // учитываем, куда сдвинется элемент
+  let shiftX = 0, shiftY = 0;
   let p = node.parentElement;
   while (p && p !== document.body) {
     const scrollY = p.scrollHeight > p.clientHeight + 1;
     const scrollX = p.scrollWidth > p.clientWidth + 1;
     if (scrollY || scrollX) {
-      const er = node.getBoundingClientRect();
+      const r = node.getBoundingClientRect();
+      const er = { top: r.top - shiftY, bottom: r.bottom - shiftY, left: r.left - shiftX, right: r.right - shiftX };
       const pr = p.getBoundingClientRect();
+      let tx = p._scroll && p._scroll.raf ? p._scroll.tx : p.scrollLeft;
+      let ty = p._scroll && p._scroll.raf ? p._scroll.ty : p.scrollTop;
+      const base = { x: p.scrollLeft, y: p.scrollTop };
       if (scrollY) {
         if (p.classList.contains('rows')) {
           // Как в Google TV: ряд с фокусом поднимается наверх
           const row = node.closest('.row');
-          if (row) p.scrollTop = row.offsetTop - parseFloat(getComputedStyle(p).paddingTop);
+          if (row) ty = row.offsetTop - parseFloat(getComputedStyle(p).paddingTop);
         } else {
           const pad = Math.min(pr.height * 0.18, 120);
-          if (er.top < pr.top + pad) p.scrollTop -= pr.top + pad - er.top;
-          else if (er.bottom > pr.bottom - pad) p.scrollTop += er.bottom - (pr.bottom - pad);
+          if (er.top < pr.top + pad) ty = base.y - (pr.top + pad - er.top);
+          else if (er.bottom > pr.bottom - pad) ty = base.y + er.bottom - (pr.bottom - pad);
         }
       }
       if (scrollX) {
         const pad = Math.min(pr.width * 0.08, 90);
-        if (er.left < pr.left + pad) p.scrollLeft -= pr.left + pad - er.left;
-        else if (er.right > pr.right - pad) p.scrollLeft += er.right - (pr.right - pad);
+        if (er.left < pr.left + pad) tx = base.x - (pr.left + pad - er.left);
+        else if (er.right > pr.right - pad) tx = base.x + er.right - (pr.right - pad);
       }
+      smoothScroll(p, tx, ty);
+      shiftX += tx - base.x;
+      shiftY += ty - base.y;
     }
     p = p.parentElement;
   }
@@ -234,6 +274,7 @@ function keepFocus(fn) {
 
 function setHero(info) {
   if (S.screen !== 'main') return;
+  if ((info.title || '') !== $('heroTitle').textContent) slideIn($('heroTitle').parentElement, 0, .5, 260);
   $('heroKicker').textContent = info.kicker || '';
   $('heroTitle').textContent = info.title || '';
   $('heroSub').textContent = info.sub || '';
@@ -326,12 +367,15 @@ function row(title, items, emptyText) {
 
 // ---------- Вкладки ----------
 
+const TAB_ORDER = ['home', 'tv', 'apps', 'music', 'settings'];
 function switchTab(name) {
   if (S.tab === name && !$('panel-' + name).classList.contains('hidden')) return;
+  const dir = Math.sign(TAB_ORDER.indexOf(name) - TAB_ORDER.indexOf(S.tab)) || 1;
   S.tab = name;
   document.querySelectorAll('#tabs .tab').forEach((t) => t.classList.toggle('sel', t.dataset.tab === name));
   ['home', 'tv', 'apps', 'music', 'settings'].forEach((p) => $('panel-' + p).classList.toggle('hidden', p !== name));
   renderPanel(name);
+  slideIn($('panel-' + name), dir * 4, 0, 380); // вкладка въезжает с той стороны, куда нажали
   const titles = { home: null, tv: 'Телеканалы', apps: 'Приложения', music: 'Музыка', settings: 'Настройки' };
   if (titles[name]) setHero({ title: titles[name], color: name === 'music' ? 'transparent' : '#3b5bdb44' });
   musicBackdrop(name === 'music');
@@ -1082,6 +1126,10 @@ function modal(text, buttons, extra) {
     box.append(e);
   });
   $('modal').classList.remove('hidden');
+  if (MOTION) {
+    $('modal').animate([{ opacity: 0 }, { opacity: 1 }], { duration: 200, easing: 'ease-out' });
+    $('modal').firstElementChild.animate([{ opacity: 0, transform: 'scale(.94) translateY(1rem)' }, { opacity: 1, transform: 'none' }], { duration: 300, easing: EASE });
+  }
   cur = null;
   setFocus(box.firstChild);
 }
@@ -1107,6 +1155,7 @@ function show(name) {
   if (S.screen === 'main' && cur) mainFocus.k = cur.dataset.k;
   S.screen = name;
   ['main', 'player', 'keytest'].forEach((s) => $(s).classList.toggle('hidden', s !== name));
+  if (MOTION && $(name).animate) $(name).animate([{ opacity: 0, transform: 'scale(1.02)' }, { opacity: 1, transform: 'none' }], { duration: 320, easing: EASE });
   cur = null;
   if (name === 'main') {
     renderPanel(S.tab);

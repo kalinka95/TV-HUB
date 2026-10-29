@@ -561,14 +561,16 @@ async function loadMusic() {
     const swap = () => {
       if (done || cov.dataset.want !== src) return;
       done = true;
-      cov.dataset.src = src;
-      if (im.complete && im.naturalWidth) {
-        cov.innerHTML = '';
-        cov.append(im);
-        $('muBgImg').style.backgroundImage = `url("${src}")`;
-        $('muBgImg').classList.add('on');
-      }
-      if (m.title) text();
+      flipCover(() => {
+        cov.dataset.src = src; // название меняется вместе с обложкой — в середине поворота
+        if (im.complete && im.naturalWidth) {
+          cov.innerHTML = '';
+          cov.append(im);
+          $('muBgImg').style.backgroundImage = `url("${src}")`;
+          $('muBgImg').classList.add('on');
+        }
+        if (m.title) text();
+      });
     };
     im.onload = swap;
     im.onerror = swap;
@@ -581,6 +583,30 @@ async function loadMusic() {
   $('muPlayIco').setAttribute('d', playing ? 'M8 5v14M16 5v14' : 'M7 5l12 7-12 7z');
   showLike(m.title ? m.liked : undefined);
   tickMusic();
+}
+// Смена трека: обложка поворачивается, как дверь вокруг середины (как на телевизоре)
+let muDir = 0;
+async function flipCover(apply) {
+  const c = $('muCover');
+  const s = muDir === -1 ? -1 : 1;
+  muDir = 0;
+  if (!c.animate || matchMedia('(prefers-reduced-motion: reduce)').matches) { apply(); return; }
+  let applied = false;
+  const once = () => { if (!applied) { applied = true; apply(); } };
+  try {
+    await c.animate([{ transform: 'perspective(900px) rotateY(0)', filter: 'brightness(1)' },
+      { transform: `perspective(900px) rotateY(${-90 * s}deg)`, filter: 'brightness(.55)' }],
+    { duration: 280, easing: 'cubic-bezier(.55,0,.9,.45)', fill: 'forwards' }).finished;
+    once();
+    await c.animate([{ transform: `perspective(900px) rotateY(${90 * s}deg)`, filter: 'brightness(.55)' },
+      { transform: `perspective(900px) rotateY(${-6 * s}deg)`, filter: 'brightness(1.05)', offset: 0.75 },
+      { transform: 'perspective(900px) rotateY(0)', filter: 'brightness(1)' }],
+    { duration: 480, easing: 'cubic-bezier(.2,.75,.3,1)' }).finished;
+  } catch (e) {
+    once();
+  } finally {
+    c.getAnimations().forEach((a) => { if (!(a instanceof CSSTransition)) a.cancel(); });
+  }
 }
 function tickMusic() {
   const m = muSt;
@@ -663,6 +689,7 @@ $('muLike').addEventListener('click', async () => {
 document.querySelectorAll('[data-mu]').forEach((b) => b.addEventListener('click', async () => {
   buzz();
   const action = b.dataset.mu;
+  if (action === 'next' || action === 'prev') muDir = action === 'prev' ? -1 : 1;
   if (action === 'playpause' && !(muSt && muSt.title)) toast('Включаю «Мою волну»…', 15000);
   try {
     const r = await fetch('/r/api/media', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Remote': KEY }, body: JSON.stringify({ action }) });

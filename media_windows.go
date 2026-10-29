@@ -252,10 +252,11 @@ func ensureMediaMonitor() {
 	}()
 }
 
-func getMedia() (mediaState, bool) {
+// Результаты названы: дополнения в defer (сердечко, обложка, время со страницы) должны попасть в ответ.
+func getMedia() (st mediaState, ok bool) {
 	ensureMediaMonitor()
 	mediaMu.Lock()
-	st, ok := media, mediaFails <= 5
+	st, ok = media, mediaFails <= 5
 	mediaMu.Unlock()
 	defer func() {
 		fillCoverFallback(&st)

@@ -688,11 +688,17 @@ func launchMusic(a App) error {
 func launchMusicNoWave(a App) error {
 	if exe := findYandexMusic(); exe != "" {
 		if p := ymDesktopProc(exe); p != 0 && focusPID(p) {
+			go func() { time.Sleep(600 * time.Millisecond); curtainDown(windowOfPID(p)) }()
 			return nil
 		}
+		before := topWindows()
 		// Порт отладки — чтобы TVHub мог нажать «Моя волна» (если приложение это позволяет)
-		return windows.ShellExecute(0, windows.StringToUTF16Ptr("open"), windows.StringToUTF16Ptr(exe),
-			windows.StringToUTF16Ptr("--remote-debugging-port="+ymDesktopPort), windows.StringToUTF16Ptr(filepath.Dir(exe)), 1)
+		if err := windows.ShellExecute(0, windows.StringToUTF16Ptr("open"), windows.StringToUTF16Ptr(exe),
+			windows.StringToUTF16Ptr("--remote-debugging-port="+ymDesktopPort), windows.StringToUTF16Ptr(filepath.Dir(exe)), 1); err != nil {
+			return err
+		}
+		go revealProgram(before, 0)
+		return nil
 	}
 	return openWebApp(a)
 }

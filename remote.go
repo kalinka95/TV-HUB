@@ -387,7 +387,19 @@ func startRemoteServer() {
 		case "show":
 			showScreen("music")
 		case "open":
-			err = launchApp(yandexMusicApp)
+			a := yandexMusicApp
+			cfgMu.Lock()
+			for _, x := range cfg.Apps {
+				if x.ID == a.ID {
+					a = x
+				}
+			}
+			cfgMu.Unlock()
+			// Как с главного экрана: сначала заставка перехода на телевизоре, потом приложение
+			tvFront()
+			pushEvent(map[string]any{"type": "launch", "app": a})
+			time.Sleep(200 * time.Millisecond)
+			err = launchApp(a)
 		case "playpause":
 			if st, _ := getMedia(); st.Title == "" {
 				info = startMusic() // ничего не играет — включаем «Мою волну» и сообщаем, что вышло

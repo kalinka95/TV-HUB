@@ -166,7 +166,14 @@ func findBrowser() string {
 // closeWebApp закрывает окна онлайн-сервисов, открытые из TVHub (при выходе и перезапуске).
 func closeWebApp() { closeAllWebApps() }
 
-func launchApp(a App) error {
+func launchApp(a App) (err error) {
+	// Пока приложение открывается, TVHub с заставкой — поверх всех окон
+	curtainUp()
+	defer func() {
+		if err != nil {
+			curtainDown(0)
+		}
+	}()
 	switch a.Type {
 	case "music":
 		return launchMusic(a)
@@ -181,7 +188,12 @@ func launchApp(a App) error {
 			args = windows.StringToUTF16Ptr(a.Args)
 		}
 		dir := windows.StringToUTF16Ptr(filepath.Dir(a.Target))
-		return windows.ShellExecute(0, windows.StringToUTF16Ptr("open"), windows.StringToUTF16Ptr(a.Target), args, dir, 3)
+		before := topWindows()
+		if err := windows.ShellExecute(0, windows.StringToUTF16Ptr("open"), windows.StringToUTF16Ptr(a.Target), args, dir, 3); err != nil {
+			return err
+		}
+		go revealProgram(before, 0)
+		return nil
 	}
 	return fmt.Errorf("неизвестный тип приложения %q", a.Type)
 }
@@ -289,6 +301,7 @@ func goHome() {
 	if wv == nil {
 		return
 	}
+	curtainCancel()
 	go pauseWebApps() // окна остаются в фоне, видео и звук — на паузе
 	cfgMu.Lock()
 	fs := cfg.Settings.Fullscreen

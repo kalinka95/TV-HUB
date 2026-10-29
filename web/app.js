@@ -548,8 +548,8 @@ async function launch(app) {
   showLaunch(app);
   try {
     const r = await api.post('/api/launch', { id: app.id });
-    if (!r.ok) toast('Не удалось открыть: ' + r.error, 5000);
-  } catch (e) { toast('Ошибка: ' + e.message, 5000); }
+    if (!r.ok) { hideLaunch(0); toast('Не удалось открыть: ' + r.error, 5000); }
+  } catch (e) { hideLaunch(0); toast('Ошибка: ' + e.message, 5000); }
 }
 
 function moveApp(app, d) {
@@ -982,6 +982,7 @@ function listenEvents() {
     else if (ev.type === 'play') onPlayEvent(ev);
     else if (ev.type === 'tv') tvNow();
     else if (ev.type === 'appShown') hideLaunch(500);
+    else if (ev.type === 'launch' && ev.app) { if ($('launch').classList.contains('hidden')) { closeSearch(); hideSaver(); showLaunch(ev.app); } }
     else if (ev.type === 'key') {
       const key = KEYS[ev.key] || ev.key;
       if (key.length === 1 && cur && cur.tagName === 'INPUT' && /[0-9 ]/.test(key)) { cur.setRangeText(key, cur.selectionStart, cur.selectionEnd, 'end'); return; }
@@ -1061,8 +1062,8 @@ function showLaunch(app) {
   void l.offsetWidth;
   l.classList.add('in');
   clearTimeout(launchTimer);
-  // Сайты сообщают, когда окно готово; программы — просто скрываем через пару секунд
-  launchTimer = setTimeout(() => hideLaunch(0), app.type === 'web' ? 15000 : 3500);
+  // TVHub сам сообщает, когда приложение готово и на весь экран (appShown); это — на всякий случай
+  launchTimer = setTimeout(() => hideLaunch(0), 26000);
 }
 function hideLaunch(delay) {
   const l = $('launch');

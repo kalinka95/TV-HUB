@@ -372,6 +372,7 @@ func openWebApp(a App) error {
 	defer webLaunchMu.Unlock()
 	browser := findBrowser()
 	if browser == "" {
+		go func() { time.Sleep(2500 * time.Millisecond); curtainDown(0) }()
 		return windows.ShellExecute(0, nil, windows.StringToUTF16Ptr(a.Target), nil, nil, 1)
 	}
 	dir := profileDir(appProfile(a))
@@ -391,7 +392,7 @@ func openWebApp(a App) error {
 	if h != 0 {
 		if alive, _, _ := procIsWindow.Call(h); alive != 0 {
 			focusWindow(h)
-			pushEvent(map[string]string{"type": "appShown"})
+			go func() { time.Sleep(600 * time.Millisecond); curtainDown(h) }() // окно успевает развернуться
 			return nil
 		}
 	}
@@ -405,14 +406,15 @@ func openWebApp(a App) error {
 		// 2. Ищем окно сайта через Edge (например, после перезапуска TVHub)
 		for _, t := range list {
 			if t.Type == "page" && sameSite(t.URL, a.Target) {
-				if h := windowOfProfile(dir, t.Title); h != 0 {
+				h := windowOfProfile(dir, t.Title)
+				if h != 0 {
 					focusWindow(h)
 					rememberAppWindow(a.ID, h)
 				} else if t.WS != "" {
 					cdpCall(t.WS, "Page.bringToFront", map[string]any{})
 				}
 				fullscreenTarget(port, t.ID)
-				pushEvent(map[string]string{"type": "appShown"})
+				go func() { time.Sleep(900 * time.Millisecond); curtainDown(h) }()
 				return nil
 			}
 		}
@@ -474,7 +476,8 @@ func tvhubMonitor() rect {
 // revealWhenReady ждёт, пока страница сервиса загрузится, и только тогда выводит окно
 // на весь экран. Пока окно грузится, TVHub показывает заставку перехода.
 func revealWhenReady(dir string, a App, before map[uintptr]bool, targetID string) {
-	defer pushEvent(map[string]string{"type": "appShown"})
+	var shown uintptr
+	defer func() { curtainDown(shown) }() // TVHub уходит назад, только когда окно готово
 	start := time.Now()
 	var port string
 	var t cdpTarget
@@ -534,7 +537,9 @@ func revealWhenReady(dir string, a App, before map[uintptr]bool, targetID string
 		procShowWindow.Call(h, 3) // SW_MAXIMIZE
 	}
 	rememberAppWindow(a.ID, h)
-	focusWindow(h)
+	focusWindow(h)                     // пока за TVHub — он ещё поверх всех окон
+	time.Sleep(900 * time.Millisecond) // окно успевает перейти на весь экран и отрисоваться
+	shown = h
 }
 
 // pauseWebApps — на «Домой»: пауза во всех сервисах, кроме музыки.

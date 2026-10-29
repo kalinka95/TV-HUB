@@ -25,7 +25,7 @@ import (
 )
 
 // Версию подставляет сборка на GitHub (-ldflags -X main.appVersion=…)
-var appVersion = "1.4.4"
+var appVersion = "1.4.5"
 
 //go:embed web
 var webFS embed.FS
@@ -647,6 +647,10 @@ func handleLaunch(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	cfgMu.Unlock()
+	if app == nil && req.ID == yandexMusicApp.ID { // Яндекс Музыку убрали из приложений — открываем всё равно
+		a := yandexMusicApp
+		app = &a
+	}
 	if app == nil {
 		http.Error(w, "приложение не найдено", 404)
 		return

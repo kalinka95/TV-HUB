@@ -435,7 +435,7 @@ func startRemoteServer() {
 	mux.HandleFunc("POST /r/api/screen", remoteAuth(func(w http.ResponseWriter, r *http.Request) {
 		var req struct{ Name string }
 		json.NewDecoder(io.LimitReader(r.Body, 1024)).Decode(&req)
-		if req.Name != "settings" && req.Name != "music" && req.Name != "home" {
+		if req.Name != "settings" && req.Name != "music" && req.Name != "home" && req.Name != "saver" {
 			http.Error(w, "unknown screen", 400)
 			return
 		}

@@ -4,6 +4,7 @@
 package main
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,6 +19,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf16"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -555,6 +557,11 @@ func setHappVPN(on bool) error {
 			return errHappAdmin
 		}
 		showHapp(p)
+		if happClick(dir, true) && waitVPN(true, 10*time.Second) {
+			wv.Dispatch(bringToFront)
+			return nil
+		}
+		showHapp(p)
 		return errNeedClick
 	}
 
@@ -588,7 +595,84 @@ func setHappVPN(on bool) error {
 	_, tun, _ := vpnConnected()
 	log.Printf("vpn: после закрытия Happ туннель остался: %s", tun)
 	showHapp(p)
+	if happClick(dir, false) && waitVPN(false, 6*time.Second) {
+		wv.Dispatch(bringToFront)
+		return nil
+	}
+	showHapp(p)
 	return errNeedClick
+}
+
+// happClickScript ищет в окне Happ кнопку «Подключить» (или «Отключить») через специальные
+// возможности Windows (UI Automation) и нажимает её. Отвечает строкой: clicked|…, none|что нашлось.
+const happClickScript = `
+$ErrorActionPreference = 'SilentlyContinue'
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
+Add-Type -Namespace TVHub -Name Mouse -MemberDefinition '[DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y); [DllImport("user32.dll")] public static extern void mouse_event(uint f, uint x, uint y, uint d, System.UIntPtr e);'
+$ids = $env:TVHUB_PIDS.Split(',') | ForEach-Object { [int]$_ }
+$wantOn = $env:TVHUB_WANT -ne 'off'
+$A = [Windows.Automation.AutomationElement]
+$CT = [Windows.Automation.ControlType]
+$want = if ($wantOn) { '(?i)подключ|connect|включ|старт|start|запуст|^power$|^vpn$' } else { '(?i)отключ|disconnect|выключ|стоп|stop|^power$|^vpn$' }
+$skip = '(?i)настро|setting|подписк|subscri|добав|\badd\b|обнов|update|сервер|server|маршрут|routing|журнал|\blogs?\b|выход|exit|quit|закр|close|сверн|minim|разверн|maxim|windows|автозап|при запуске|autostart|startup|launch'
+if ($wantOn) { $skip += '|отключ|disconnect|выключ|стоп|stop' }
+$seen = @()
+for ($try = 0; $try -lt 6; $try++) {
+  $wins = $A::RootElement.FindAll([Windows.Automation.TreeScope]::Children, [Windows.Automation.Condition]::TrueCondition) | Where-Object { $ids -contains $_.Current.ProcessId }
+  foreach ($w in $wins) {
+    foreach ($e in $w.FindAll([Windows.Automation.TreeScope]::Descendants, [Windows.Automation.Condition]::TrueCondition)) {
+      $c = $e.Current
+      $n = (($c.Name + ' ' + $c.HelpText + ' ' + $c.AutomationId).Trim())
+      if ($n) { $seen += "$($c.ControlType.ProgrammaticName -replace 'ControlType.','')=$n" }
+      if (-not $n -or $n -match $skip -or $n -notmatch $want) { continue }
+      if ($c.ControlType -ne $CT::Button -and $c.ControlType -ne $CT::CheckBox -and $c.ControlType -ne $CT::Custom -and $c.ControlType -ne $CT::Hyperlink) { continue }
+      $pat = $null
+      if ($e.TryGetCurrentPattern([Windows.Automation.TogglePattern]::Pattern, [ref]$pat)) {
+        $isOn = $pat.Current.ToggleState -eq [Windows.Automation.ToggleState]::On
+        if ($isOn -ne $wantOn) { $pat.Toggle() }
+        [Console]::Out.WriteLine("clicked|toggle|$n"); exit
+      }
+      if ($e.TryGetCurrentPattern([Windows.Automation.InvokePattern]::Pattern, [ref]$pat)) { $pat.Invoke(); [Console]::Out.WriteLine("clicked|invoke|$n"); exit }
+      $r = $c.BoundingRectangle
+      if ($r.Width -gt 0 -and $r.Height -gt 0) {
+        [TVHub.Mouse]::SetCursorPos([int]($r.X + $r.Width / 2), [int]($r.Y + $r.Height / 2)) | Out-Null
+        Start-Sleep -Milliseconds 80
+        [TVHub.Mouse]::mouse_event(2, 0, 0, 0, [UIntPtr]::Zero); [TVHub.Mouse]::mouse_event(4, 0, 0, 0, [UIntPtr]::Zero)
+        [Console]::Out.WriteLine("clicked|mouse|$n"); exit
+      }
+    }
+  }
+  Start-Sleep -Milliseconds 700 # окно Happ ещё появляется
+}
+[Console]::Out.WriteLine('none|' + (($seen | Select-Object -Unique -First 30) -join ' / '))
+`
+
+// happClick нажимает в окне Happ кнопку подключения (on) или отключения. true — кнопку нашли и нажали.
+func happClick(dir string, on bool) bool {
+	var ids []string
+	for _, x := range happProcs(dir) {
+		ids = append(ids, fmt.Sprint(x.pid))
+	}
+	if len(ids) == 0 {
+		return false
+	}
+	ps := filepath.Join(os.Getenv("SystemRoot"), `System32\WindowsPowerShell\v1.0\powershell.exe`)
+	u := utf16.Encode([]rune(happClickScript))
+	b := make([]byte, len(u)*2)
+	for i, c := range u {
+		b[2*i], b[2*i+1] = byte(c), byte(c>>8)
+	}
+	cmd := hiddenCmd(ps, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", base64.StdEncoding.EncodeToString(b))
+	want := "on"
+	if !on {
+		want = "off"
+	}
+	cmd.Env = append(os.Environ(), "TVHUB_PIDS="+strings.Join(ids, ","), "TVHUB_WANT="+want)
+	out, err := cmd.Output()
+	res := strings.TrimSpace(string(out))
+	log.Printf("vpn: кнопка в Happ (%s): %s %v", want, res, err)
+	return strings.HasPrefix(res, "clicked|")
 }
 
 // openVPNApp выводит окно Happ на экран (запускает, если закрыт).

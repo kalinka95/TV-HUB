@@ -1134,6 +1134,14 @@ function hideLaunch(delay) {
 // Вызывается с пульта: показать вкладку («Музыка», «Настройки») на экране
 window.tvShow = function (name) {
   closeSearch();
+  if (name === 'saver') { // заставка по долгому нажатию на обложку в пульте
+    hideLaunch(0);
+    if (!$('modal').classList.contains('hidden')) closeModal();
+    if (S.screen === 'player') exitPlayer();
+    if (S.screen !== 'main') show('main');
+    setTimeout(showSaver, 250);
+    return;
+  }
   hideSaver();
   hideLaunch(0);
   if (!$('modal').classList.contains('hidden')) closeModal();

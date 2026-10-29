@@ -312,7 +312,12 @@ func startRemoteServer() {
 	// Поиск каналов с телефона: список найденных, открыть поиск на экране, включить канал
 	mux.HandleFunc("GET /r/api/channels", remoteAuth(func(w http.ResponseWriter, r *http.Request) {
 		ch, _ := getChannels(false)
-		list := displayChannels(ch)
+		var list []Channel
+		for _, c := range displayChannels(ch) {
+			if !c.Adult { // каналы 18+ на телефоне не показываем: они закрыты PIN-кодом на экране
+				list = append(list, c)
+			}
+		}
 		q := r.URL.Query().Get("q")
 		var found []Channel
 		if searchNorm(q) == "" {

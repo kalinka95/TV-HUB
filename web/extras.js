@@ -796,6 +796,7 @@ function renderExtraSettings(inner) {
   f.append(btn('Обновить', async () => { await api.post('/api/epg/reload', {}); toast('Загружаю телепрограмму, это может занять минуту'); }, 'epg-reload'));
   tv.append(f);
   inner.append(tv);
+  adultSection(inner);
 
   // Погода
   const wx = el('div', 's-section');

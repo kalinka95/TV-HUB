@@ -25,7 +25,7 @@ import (
 )
 
 // Версию подставляет сборка на GitHub (-ldflags -X main.appVersion=…)
-var appVersion = "1.4.2"
+var appVersion = "1.4.3"
 
 //go:embed web
 var webFS embed.FS
@@ -65,7 +65,8 @@ type Settings struct {
 	DarkSites         bool   `json:"darkSites,omitempty"`  // Edge затемняет сайты без своей тёмной темы
 	VPNForRu          bool   `json:"vpnForRu,omitempty"`   // true = российские сервисы тоже через VPN
 	VPNHidden         bool   `json:"vpnHidden,omitempty"`
-	EQ                *EQ    `json:"eq,omitempty"` // эквалайзер (Equalizer APO)
+	EQ                *EQ    `json:"eq,omitempty"`    // эквалайзер (Equalizer APO)
+	Adult             bool   `json:"adult,omitempty"` // показывать каналы 18+ (под PIN-кодом)
 }
 
 type Config struct {
@@ -80,6 +81,7 @@ type Config struct {
 	YaMusicAdded   bool            `json:"yaMusicAdded,omitempty"`
 	ClearCity      bool            `json:"clearCity,omitempty"` // только в запросе: убрать город
 	Likes          map[string]bool `json:"likes,omitempty"`     // треки, отмеченные «Мне нравится» через TVHub
+	AdultPin       string          `json:"adultPin,omitempty"`  // PIN для каналов 18+ (хранится в виде отпечатка)
 }
 
 const tvUA = "Mozilla/5.0 (SMART-TV; LINUX; Tizen 6.0) AppleWebKit/537.36 (KHTML, like Gecko) 85.0.4183.93/6.0 TV Safari/537.36"
@@ -196,7 +198,8 @@ type Channel struct {
 	UA    string `json:"ua,omitempty"`
 	Ref   string `json:"ref,omitempty"`
 	TvgID string `json:"tvgId,omitempty"`
-	Orig  string `json:"orig,omitempty"` // название из плейлиста, если показываем русское
+	Orig  string `json:"orig,omitempty"`  // название из плейлиста, если показываем русское
+	Adult bool   `json:"adult,omitempty"` // канал 18+ (закрыт PIN-кодом)
 }
 
 var (
@@ -342,7 +345,7 @@ func getChannels(force bool) ([]Channel, error) {
 	cacheMu.Lock()
 	defer cacheMu.Unlock()
 	if !force && cache.src == src && time.Since(cache.at) < 6*time.Hour {
-		return cache.channels, nil
+		return withAdult(cache.channels, false), nil
 	}
 	rc, err := openPlaylist(src)
 	if err != nil {
@@ -351,7 +354,7 @@ func getChannels(force bool) ([]Channel, error) {
 	defer rc.Close()
 	ch := parseM3U(rc)
 	cache = plCache{src: src, at: time.Now(), channels: ch}
-	return ch, nil
+	return withAdult(ch, force), nil
 }
 
 // ---------- Прокси для потоков (обходит CORS, переписывает ссылки в .m3u8) ----------
@@ -546,6 +549,7 @@ func handleState(w http.ResponseWriter, r *http.Request) {
 	cfgMu.Lock()
 	c := cfg
 	cfgMu.Unlock()
+	c.AdultPin = "" // PIN проверяет только TVHub
 	writeJSON(w, map[string]any{"config": c, "version": appVersion, "platform": platformName, "dataDir": dataDir})
 }
 
@@ -568,7 +572,8 @@ func handleSaveConfig(w http.ResponseWriter, r *http.Request) {
 	c.Settings.DarkSites = cfg.Settings.DarkSites
 	c.Settings.EQ = cfg.Settings.EQ
 	c.Likes = cfg.Likes
-	if c.Settings.City == nil { // город сбрасывается только явно, не из-за устаревшей копии настроек
+	c.AdultPin, c.Settings.Adult = cfg.AdultPin, cfg.Settings.Adult // меняются только через /api/adult
+	if c.Settings.City == nil {                                     // город сбрасывается только явно, не из-за устаревшей копии настроек
 		c.Settings.City = cfg.Settings.City
 	}
 	if c.ClearCity {
@@ -694,6 +699,7 @@ func startServer() (string, error) {
 	mux.HandleFunc("/api/whatsnew", apiAuth(handleWhatsNew))
 	mux.HandleFunc("/api/brightness", apiAuth(handleBrightness))
 	mux.HandleFunc("/api/eq", apiAuth(handleEQ))
+	mux.HandleFunc("POST /api/adult", apiAuth(handleAdult))
 	mux.HandleFunc("/api/theme", apiAuth(handleTheme))
 	mux.HandleFunc("GET /api/notices", apiAuth(handleNotices))
 	mux.HandleFunc("POST /api/notices/read", apiAuth(handleNoticesRead))

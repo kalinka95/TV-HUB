@@ -35,6 +35,7 @@ const ICONS = {
   restart: '<svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.3-5.7"/><path d="M4 4v5h5"/></svg>',
   exit: '<svg viewBox="0 0 24 24"><path d="M14 4h5v16h-5"/><path d="M10 8l-4 4 4 4"/><path d="M6 12h10"/></svg>',
   star: '<svg viewBox="0 0 24 24"><path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"/></svg>',
+  lock: '<svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>',
   tv: '<svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M8 2l4 4 4-4"/></svg>',
   plus: '<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>',
   phone: '<svg viewBox="0 0 24 24"><rect x="6" y="2" width="12" height="20" rx="2.5"/><path d="M11 18h2"/><circle cx="12" cy="10" r="2.6"/></svg>',
@@ -375,8 +376,8 @@ function renderHome() {
 
   // Телеканалы: отдельно «Продолжить» (последний канал), дальше только избранные
   const items = [];
-  const last = chs.find((c) => c.url === S.cfg.lastChannel);
-  const favList = chs.filter((c) => isFav(c.url));
+  const last = visibleChannels().find((c) => c.url === S.cfg.lastChannel);
+  const favList = visibleChannels().filter((c) => isFav(c.url));
   if (S.chLoading) items.push(el('div', 'empty-note', 'Загружаю список каналов…'));
   else if (S.chError) items.push(el('div', 'empty-note', 'Не удалось загрузить каналы: ' + esc(S.chError)));
   else {
@@ -429,7 +430,8 @@ function focusTab(name, focusContent = true) {
 // ---------- Телеканалы ----------
 
 function filteredChannels() {
-  let list = S.channels;
+  let list = visibleChannels(); // каналы 18+ — только после PIN-кода
+  if (S.tvGroup === ADULT_GROUP && adultLocked()) return [];
   if (S.tvGroup === '__fav') list = list.filter((c) => isFav(c.url));
   else if (S.tvGroup !== '__all') list = list.filter((c) => c.group === S.tvGroup);
   if (S.search) {
@@ -443,9 +445,9 @@ function renderTV() {
   const g = $('groups');
   g.dataset.sticky = '1';
   g.innerHTML = '';
-  const favCount = S.channels.filter((c) => isFav(c.url)).length;
-  const groups = [{ id: '__all', name: 'Все каналы', count: S.channels.length }, { id: '__fav', name: '★ Избранное', count: favCount }]
-    .concat(S.groups.map((x) => ({ id: x.name, name: x.name, count: x.count })));
+  const favCount = visibleChannels().filter((c) => isFav(c.url)).length;
+  const groups = [{ id: '__all', name: 'Все каналы', count: visibleChannels().length }, { id: '__fav', name: '★ Избранное', count: favCount }]
+    .concat(S.groups.map((x) => ({ id: x.name, name: (x.name === ADULT_GROUP && adultLocked() ? '🔒 ' : '') + x.name, count: x.count })));
   const sb = el('button', 'f grp grp-search', '<span>🔍 Поиск канала</span>');
   sb.dataset.k = 'g:__search';
   sb._act = () => openSearch();
@@ -479,6 +481,11 @@ function renderGrid() {
     ? `Поиск: <b>${esc(S.search)}</b> · найдено ${list.length} · Backspace — стереть`
     : 'Поиск: OK на «🔍 Поиск канала» или наберите название буквами';
   if (S.chLoading) { grid.append(el('div', 'grid-more', 'Загружаю список каналов…')); return; }
+  if (S.tvGroup === ADULT_GROUP && adultLocked()) {
+    const b = tile('lock', 'Ввести PIN-код', async () => { if (await unlockAdult()) { renderTV(); focusFirst($('chGrid')); } }, 'adult-pin', { kicker: 'Каналы 18+', sub: 'Категория закрыта PIN-кодом' });
+    grid.append(b);
+    return;
+  }
   if (!list.length) {
     grid.append(el('div', 'grid-more', S.tvGroup === '__fav' ? 'В избранном пока пусто. Нажмите «Меню» на канале, чтобы добавить его.' : (S.chError ? 'Ошибка: ' + esc(S.chError) : 'Ничего не найдено')));
     return;
@@ -985,6 +992,7 @@ function modal(text, buttons, extra) {
   setFocus(box.firstChild);
 }
 function closeModal() {
+  pinCancelled();
   $('modal').classList.add('hidden');
   const r = modalReturn;
   modalReturn = null;
@@ -1084,7 +1092,8 @@ function proxied(ch) {
 }
 
 function playChannel(ch, list) {
-  P.list = list && list.length ? list : S.channels;
+  if (ch.adult && adultLocked()) { unlockAdult().then((ok) => { if (ok) playChannel(ch, list); }); return; }
+  P.list = list && list.length ? list : visibleChannels();
   P.idx = P.list.findIndex((c) => c.url === ch.url);
   if (P.idx < 0) { P.list = [ch]; P.idx = 0; }
   show('player');
@@ -1462,6 +1471,11 @@ function onKey(e) {
   }
   if (k === 'home') { e.preventDefault(); window.tvHome(); return; }
   if (k === 'fullscreen') { e.preventDefault(); api.post('/api/system', { action: 'fullscreen' }); return; }
+  // Ввод PIN-кода: цифры с пульта, клавиатуры или телефона
+  if (PIN.active && !$('modal').classList.contains('hidden')) {
+    if (/^[0-9]$/.test(e.key)) { e.preventDefault(); pinDigit(e.key); return; }
+    if (k === 'backspace') { e.preventDefault(); pinErase(); return; }
+  }
   // Окно поиска каналов: буквы, «Стереть» и «Назад»
   if (SR.open && $('modal').classList.contains('hidden') && searchKey(k, e)) { e.preventDefault(); return; }
 

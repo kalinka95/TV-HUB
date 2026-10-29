@@ -18,7 +18,7 @@ function srFind(q) {
   if (!q) return null;
   const qs = q.replace(/ /g, '');
   const hits = [];
-  for (const c of S.channels) {
+  for (const c of visibleChannels()) {
     let sc = String(c.n) === q ? 0 : -1;
     for (const name of [c.name, c.orig]) {
       const n = srNorm(name);
@@ -118,8 +118,8 @@ function renderSearch() {
       list = P.list.slice(from, from + 40);
       head = 'Каналы рядом с текущим';
     } else {
-      const fav = S.channels.filter((c) => isFav(c.url));
-      list = fav.length ? fav : S.channels.slice(0, 40);
+      const fav = visibleChannels().filter((c) => isFav(c.url));
+      list = fav.length ? fav : visibleChannels().slice(0, 40);
       head = fav.length ? '★ Избранное' : 'Каналы';
     }
   } else head = list.length ? `Найдено: ${list.length}${list.length === 60 ? '+' : ''}` : 'Ничего не найдено';
@@ -143,7 +143,7 @@ function renderSearch() {
 function srPlay(ch, list) {
   closeSearch();
   // Кнопки «канал +/−» после поиска листают весь список, если канал из него
-  playChannel(ch, S.channels.includes(ch) ? S.channels : list);
+  playChannel(ch, visibleChannels().includes(ch) ? visibleChannels() : list);
 }
 
 // Кнопки в окне поиска. true — нажатие обработано.

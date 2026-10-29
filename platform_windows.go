@@ -164,7 +164,16 @@ func findBrowser() string {
 }
 
 // closeWebApp закрывает окна онлайн-сервисов, открытые из TVHub (при выходе и перезапуске).
-func closeWebApp() { closeAllWebApps() }
+func closeWebApp() {
+	if keepWebApps {
+		return // TVHub перезапускается (обновление, права администратора) — сервисы остаются открытыми
+	}
+	closeAllWebApps()
+}
+
+// keepWebApps — при перезапуске TVHub не закрывать окна сервисов: новая версия сама к ним подключится,
+// входы в аккаунты не теряются, музыка продолжает играть.
+var keepWebApps bool
 
 func launchApp(a App) (err error) {
 	// Пока приложение открывается, TVHub с заставкой — поверх всех окон

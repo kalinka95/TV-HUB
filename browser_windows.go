@@ -116,6 +116,47 @@ func profileProcs(dir string) (all []uint32, main uint32) {
 	return
 }
 
+// closeProfile закрывает Edge с этим профилем мягко — так он успевает сохранить входы в аккаунты
+// (при мгновенном закрытии свежие входы терялись). Не закрылся за 5 секунд — закрываем принудительно.
+func closeProfile(dir string) {
+	all, _ := profileProcs(dir)
+	if len(all) == 0 {
+		return
+	}
+	asked := false
+	if _, port := cdpTargets(dir); port != "" {
+		if ws := browserWS(port); ws != "" {
+			_, err := cdpCall(ws, "Browser.close", map[string]any{})
+			asked = err == nil
+		}
+	}
+	if !asked { // нет управления — просим закрыться каждое окно, как при нажатии на крестик
+		pids := map[uint32]bool{}
+		for _, p := range all {
+			pids[p] = true
+		}
+		for _, it := range topWindowsAll() {
+			if pids[it.pid] {
+				procPostMessage.Call(it.hwnd, wmClose, 0, 0)
+			}
+		}
+	}
+	for t := time.Now(); time.Since(t) < 5*time.Second; time.Sleep(200 * time.Millisecond) {
+		if left, _ := profileProcs(dir); len(left) == 0 {
+			return
+		}
+	}
+	killProfile(dir)
+}
+
+func topWindowsAll() []winItem {
+	enumMu.Lock()
+	defer enumMu.Unlock()
+	enumList = nil
+	procEnumWindows.Call(enumCB, 0)
+	return enumList
+}
+
 func killProfile(dir string) {
 	all, _ := profileProcs(dir)
 	for _, pid := range all {
@@ -393,7 +434,7 @@ func openWebApp(a App) error {
 	prepareRuService(a)
 	// Edge, запущенный без нужной настройки обхода VPN, перезапускаем
 	if _, main := profileProcs(dir); main != 0 && bypassVPN(a) != strings.Contains(processCmdline(main), "--no-proxy-server") {
-		killProfile(dir)
+		closeProfile(dir)
 		time.Sleep(700 * time.Millisecond)
 		appWinMu.Lock()
 		delete(appWins, a.ID)
@@ -420,7 +461,7 @@ func openWebApp(a App) error {
 		list, port := cdpTargets(dir)
 		if port == "" {
 			// Edge открыт прежней версией TVHub, и им нельзя управлять — перезапускаем его один раз
-			killProfile(dir)
+			closeProfile(dir)
 			time.Sleep(700 * time.Millisecond)
 		}
 		// 2. Ищем окно сайта через Edge (например, после перезапуска TVHub)
@@ -580,11 +621,14 @@ func pauseWebApps() {
 // closeAllWebApps — при выходе из TVHub закрываем окна сервисов (музыку тоже).
 func closeAllWebApps() {
 	entries, _ := os.ReadDir(dataDir)
+	var wg sync.WaitGroup
 	for _, e := range entries {
 		if e.IsDir() && strings.HasPrefix(e.Name(), "browser") {
-			killProfile(profileDir(e.Name()))
+			wg.Add(1)
+			go func(dir string) { defer wg.Done(); closeProfile(dir) }(profileDir(e.Name()))
 		}
 	}
+	wg.Wait()
 }
 
 // restartWebApps закрывает окна сайтов (кроме музыки), чтобы новые настройки Edge применились.
@@ -592,7 +636,7 @@ func restartWebApps() {
 	entries, _ := os.ReadDir(dataDir)
 	for _, e := range entries {
 		if e.IsDir() && strings.HasPrefix(e.Name(), "browser") && e.Name() != "browser-music" {
-			killProfile(profileDir(e.Name()))
+			closeProfile(profileDir(e.Name()))
 		}
 	}
 }

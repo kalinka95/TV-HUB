@@ -82,7 +82,7 @@ func relaunchElevated() error {
 		windows.StringToUTF16Ptr("--wait-previous"), nil, 1); err != nil {
 		return errors.New("запуск с правами администратора отменён")
 	}
-	closeWebApp()
+	keepWebApps = true // окна сервисов не закрываем
 	wv.Dispatch(func() { wv.Terminate() })
 	return nil
 }
@@ -150,7 +150,7 @@ func relaunchNormal() error {
 	if err := hiddenCmd("cmd", "/c", `ping -n 3 127.0.0.1 >nul & explorer.exe "`+exe+`"`).Start(); err != nil {
 		return err
 	}
-	closeWebApp()
+	keepWebApps = true // окна сервисов не закрываем
 	wv.Dispatch(func() { wv.Terminate() })
 	return nil
 }

@@ -76,7 +76,7 @@ func restartSelf(exe string, args ...string) error {
 	}
 	go func() {
 		time.Sleep(300 * time.Millisecond)
-		closeWebApp()
+		keepWebApps = true // окна сервисов не закрываем
 		wv.Dispatch(func() { wv.Terminate() })
 	}()
 	return nil

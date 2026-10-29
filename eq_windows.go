@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unsafe"
 
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
@@ -53,7 +54,94 @@ func eqSystemStatus() map[string]any {
 	eqDlMu.Lock()
 	dl := eqDlState
 	eqDlMu.Unlock()
-	return map[string]any{"installed": d != "", "dir": d, "download": dl}
+	st := map[string]any{"installed": d != "", "dir": d, "download": dl}
+	if d != "" {
+		if name, on, err := eqDeviceActive(); err == nil {
+			st["device"], st["active"] = name, on
+		}
+	}
+	return st
+}
+
+var procCoTaskMemFree = ole32.NewProc("CoTaskMemFree")
+
+// defaultRenderID — идентификатор устройства, через которое сейчас идёт звук.
+func defaultRenderID() (string, error) {
+	var id string
+	err := withVolumeDevice(func(dev *comObj) error {
+		var p *uint16
+		if r := dev.call(5, uintptr(unsafe.Pointer(&p))); r != 0 || p == nil { // IMMDevice::GetId
+			return errors.New("нет устройства")
+		}
+		id = windows.UTF16PtrToString(p)
+		procCoTaskMemFree.Call(uintptr(unsafe.Pointer(p)))
+		return nil
+	})
+	return id, err
+}
+
+// eqDeviceActive — подключён ли Equalizer APO к устройству, через которое сейчас идёт звук.
+// Смотрим обработчики звука этого устройства в реестре и ищем среди них библиотеку Equalizer APO.
+func eqDeviceActive() (string, bool, error) {
+	id, err := defaultRenderID()
+	if err != nil {
+		return "", false, err
+	}
+	guid := id[strings.LastIndex(id, ".")+1:]
+	base := `SOFTWARE\Microsoft\Windows\CurrentVersion\MMDevices\Audio\Render\` + guid
+	name := ""
+	if k, err := registry.OpenKey(registry.LOCAL_MACHINE, base+`\Properties`, registry.QUERY_VALUE|registry.WOW64_64KEY); err == nil {
+		desc, _, _ := k.GetStringValue("{a45c254e-df1c-4efd-8020-67d146a850e0},2")  // «Динамики», «Наушники»
+		iface, _, _ := k.GetStringValue("{b3f8fa53-0004-438e-9003-51a46e139bfc},6") // название устройства или телевизора
+		k.Close()
+		name = strings.TrimSpace(desc + " (" + iface + ")")
+		if iface == "" {
+			name = desc
+		}
+	}
+	k, err := registry.OpenKey(registry.LOCAL_MACHINE, base+`\FxProperties`, registry.QUERY_VALUE|registry.WOW64_64KEY)
+	if err != nil {
+		return name, false, nil // обработчиков нет совсем
+	}
+	defer k.Close()
+	names, _ := k.ReadValueNames(-1)
+	for _, n := range names {
+		var vals []string
+		if v, _, err := k.GetStringValue(n); err == nil {
+			vals = []string{v}
+		} else if vs, _, err := k.GetStringsValue(n); err == nil {
+			vals = vs
+		}
+		for _, v := range vals {
+			v = strings.TrimSpace(v)
+			if !strings.HasPrefix(v, "{") || len(v) < 38 {
+				continue
+			}
+			ck, err := registry.OpenKey(registry.CLASSES_ROOT, `CLSID\`+v[:38]+`\InprocServer32`, registry.QUERY_VALUE|registry.WOW64_64KEY)
+			if err != nil {
+				continue
+			}
+			dll, _, _ := ck.GetStringValue("")
+			ck.Close()
+			if strings.Contains(strings.ToLower(dll), "equalizerapo") {
+				return name, true, nil
+			}
+		}
+	}
+	return name, false, nil
+}
+
+// openEQConfigurator открывает Configurator Equalizer APO: в нём отмечают устройство для эквалайзера.
+func openEQConfigurator() error {
+	d := eqConfigDir()
+	if d == "" {
+		return errors.New("Equalizer APO не установлен")
+	}
+	exe := filepath.Join(filepath.Dir(d), "Configurator.exe")
+	if _, err := os.Stat(exe); err != nil {
+		return errors.New("не нашёл Configurator.exe в папке Equalizer APO")
+	}
+	return windows.ShellExecute(0, windows.StringToUTF16Ptr("runas"), windows.StringToUTF16Ptr(exe), nil, windows.StringToUTF16Ptr(filepath.Dir(exe)), 1)
 }
 
 const eqInclude = "Include: tvhub.txt"

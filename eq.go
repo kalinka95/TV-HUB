@@ -133,8 +133,17 @@ func handleEQ(w http.ResponseWriter, r *http.Request) {
 		Preset   string    `json:"preset"`
 		Gains    []float64 `json:"gains"`
 		Download bool      `json:"download"`
+		Config   bool      `json:"configurator"`
 	}
 	json.NewDecoder(io.LimitReader(r.Body, 8192)).Decode(&req)
+	if req.Config {
+		if err := openEQConfigurator(); err != nil {
+			writeJSON(w, map[string]any{"ok": false, "error": err.Error()})
+			return
+		}
+		writeJSON(w, map[string]any{"ok": true})
+		return
+	}
 	if req.Download {
 		if err := openEQDownload(); err != nil {
 			writeJSON(w, map[string]any{"ok": false, "error": err.Error()})

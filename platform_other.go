@@ -246,3 +246,5 @@ func xrayStop()         { devXray = false }
 func xrayRunning() bool { return devXray }
 func happOffForOwn()    {}
 func ownVPNStartup()    { go refreshOwnSubscription() }
+
+func openEQConfigurator() error { log.Printf("eq configurator"); return nil }

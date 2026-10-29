@@ -907,6 +907,7 @@ function renderEQ(d) {
   const msg = $('eqMsg');
   if (d.error) { msg.textContent = d.error; msg.className = 'note eq-msg err'; }
   else if (!inst) { msg.textContent = d.status && d.status.download === 'downloading' ? 'Скачиваю установщик на компьютер…' : ''; msg.className = 'note eq-msg'; }
+  else if (d.status && d.status.active === false) { msg.textContent = `Эквалайзер сейчас не действует: Equalizer APO не подключён к устройству «${d.status.device || 'звук'}». На телевизоре: «Настройки» → «Звук: эквалайзер» → «Открыть Configurator».`; msg.className = 'note eq-msg err'; }
   else { msg.textContent = e.on ? 'Тяните ползунки — звук на компьютере меняется сразу' : 'Эквалайзер выключен'; msg.className = 'note eq-msg'; }
 }
 function drawBand(band, v) {

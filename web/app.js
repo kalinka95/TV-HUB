@@ -630,6 +630,8 @@ function renderSettings() {
   const inner = el('div', 'settings-inner');
   const c = S.cfg;
 
+  updateSection(inner); // обновления — в самом верху
+
   // Плейлисты
   const pl = el('div', 's-section');
   pl.append(el('h2', '', 'Плейлисты телеканалов'));
@@ -701,7 +703,7 @@ function renderSettings() {
   // Приложения
   const ap = el('div', 's-section');
   ap.append(el('h2', '', 'Приложения'));
-  ap.append(el('p', 'note', 'Сайты открываются в Microsoft Edge на весь экран в отдельном профиле: вход в аккаунт сохраняется. Вернуться в TVHub — кнопка «Домой» на пульте или Ctrl+Shift+H.'));
+  ap.append(el('p', 'note', 'Сайты открываются прямо в окне TVHub, без отдельных окон: вход в аккаунт сохраняется. YouTube и Яндекс Музыка — в Edge на весь экран. Вернуться в TVHub — кнопка «Домой» на пульте или Ctrl+Shift+H. «Меню» на карточке сайта — открыть его в Edge или с главной страницы.'));
   c.apps.forEach((a, i) => {
     const r = el('div', 's-row');
     r.innerHTML = `<div class="grow"><div class="title">${esc(a.name)}</div><div class="sub">${a.type === 'exe' ? 'Программа: ' : ''}${esc(a.target)}${a.args ? ' ' + esc(a.args) : ''}</div></div>`;

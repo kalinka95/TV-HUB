@@ -46,6 +46,27 @@ func (o *comObj) call(i int, args ...uintptr) uintptr {
 }
 func (o *comObj) release() { o.call(2) }
 
+// withVolumeDevice открывает устройство вывода звука по умолчанию.
+func withVolumeDevice(f func(dev *comObj) error) error {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	if r, _, _ := procCoInitializeEx.Call(0, 0); r == 0 || r == 1 {
+		defer procCoUninitialize.Call()
+	}
+	var en *comObj
+	if r, _, _ := procCoCreateInstance.Call(uintptr(unsafe.Pointer(&clsidMMDeviceEnumerator)), 0, 23,
+		uintptr(unsafe.Pointer(&iidIMMDeviceEnumerator)), uintptr(unsafe.Pointer(&en))); r != 0 || en == nil {
+		return errors.New("звук Windows недоступен")
+	}
+	defer en.release()
+	var dev *comObj
+	if r := en.call(4, 0, 0, uintptr(unsafe.Pointer(&dev))); r != 0 || dev == nil {
+		return errors.New("нет устройства вывода звука")
+	}
+	defer dev.release()
+	return f(dev)
+}
+
 // withVolume открывает регулятор громкости устройства вывода звука по умолчанию.
 func withVolume(f func(v *comObj) error) error {
 	runtime.LockOSThread()

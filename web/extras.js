@@ -849,7 +849,6 @@ function renderExtraSettings(inner) {
   eqSection(inner);
   insideSection(inner);
   themeSection(inner);
-  updateSection(inner);
 
   // Режим администратора
   const ad = el('div', 's-section');
@@ -912,7 +911,21 @@ function eqSection(inner) {
     sec.append(r);
     return;
   }
-  sec.append(el('p', 'note', 'Тонкая настройка по полосам — на пульте в телефоне, вкладка «Звук». Если звук не меняется, откройте «Configurator» из папки Equalizer APO, отметьте устройство, через которое идёт звук, и перезагрузите компьютер.'));
+  const devWarn = d.status && d.status.active === false;
+  if (devWarn) {
+    sec.append(el('p', 'note', `<b style="color:#ffb4a8">Эквалайзер сейчас не действует:</b> Equalizer APO не подключён к устройству «${esc(d.status.device || 'звук по умолчанию')}», через которое идёт звук. ` +
+      'Нажмите «Открыть Configurator», Windows спросит разрешение — нажмите «Да». В списке отметьте это устройство (обычно HDMI или название телевизора), нажмите «OK» и перезагрузите компьютер.'));
+    const r0 = el('div', 's-row');
+    r0.style.background = 'transparent'; r0.style.padding = '.2rem 0';
+    r0.append(btn('Открыть Configurator', async () => {
+      const x = await api.post('/api/eq', { configurator: true }).catch((e) => ({ ok: false, error: e.message }));
+      toast(x.ok ? 'Configurator открыт — отметьте устройство и нажмите OK. Управлять им удобно тачпадом на пульте' : (x.error || 'Не получилось'), 7000);
+    }, 'eq-cfg', 'primary'));
+    r0.append(btn('Проверить ещё раз', () => { EQS.d = null; keepFocus(renderSettings); }, 'eq-recheck2'));
+    sec.append(r0);
+  } else {
+    sec.append(el('p', 'note', 'Тонкая настройка по полосам — на пульте в телефоне, вкладка «Звук».' + (d.status && d.status.device ? ` Звук идёт через «${esc(d.status.device)}», эквалайзер к нему подключён.` : '')));
+  }
   sec.append(toggleRow('Эквалайзер включён', !!e.on, () => apply({ on: !e.on }), 'eq-on'));
   const seg = el('div', 'seg');
   seg.style.flexWrap = 'wrap';

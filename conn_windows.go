@@ -55,6 +55,46 @@ function BtList($aqs, $ms) {
   }
   , $out
 }
+# Поиск устройств — как в настройках Windows: «слушаем» эфир несколько секунд (DeviceWatcher),
+# и обычный Bluetooth, и Bluetooth LE. Имена часто приходят позже — ловим и обновления.
+function BtScan($secs) {
+  $aqs = '(System.Devices.Aep.ProtocolId:="{e0cbf06c-cd8b-4647-bb8a-263b43f0f974}" OR System.Devices.Aep.ProtocolId:="{bb7bb05e-5972-42b5-94fc-76eaa7084d49}")'
+  $w = [Windows.Devices.Enumeration.DeviceInformation]::CreateWatcher($aqs, $props, $aepKind)
+  $seen = @{}; $n = 0
+  $null = Register-ObjectEvent -InputObject $w -EventName Added -SourceIdentifier tvAdd
+  $null = Register-ObjectEvent -InputObject $w -EventName Updated -SourceIdentifier tvUpd
+  $w.Start()
+  $end = (Get-Date).AddSeconds($secs)
+  while ((Get-Date) -lt $end) {
+    $e = Wait-Event -Timeout 1
+    if (-not $e) { continue }
+    $x = $e.SourceEventArgs
+    if ($e.SourceIdentifier -eq 'tvAdd' -and $x) { $seen[$x.Id] = $x; $n++ }
+    elseif ($e.SourceIdentifier -eq 'tvUpd' -and $x -and $seen.ContainsKey($x.Id)) { $seen[$x.Id].Update($x) }
+    Remove-Event -EventIdentifier $e.EventIdentifier
+  }
+  $w.Stop()
+  Unregister-Event -SourceIdentifier tvAdd; Unregister-Event -SourceIdentifier tvUpd
+  # Запасной путь, если события не пришли: разовый запрос
+  if ($n -eq 0) {
+    $list = Await ([Windows.Devices.Enumeration.DeviceInformation]::FindAllAsync($aqs, $props, $aepKind)) ([Windows.Devices.Enumeration.DeviceInformationCollection]) 20000
+    foreach ($d in $list) { $seen[$d.Id] = $d }
+  }
+  $out = @(); $names = @{}
+  # Сначала обычный Bluetooth (наушники для музыки работают через него), потом LE с теми же именами не дублируем
+  foreach ($d in ($seen.Values | Sort-Object { $_.Id -like 'BluetoothLE*' })) {
+    $name = [string]$d.Name
+    if (-not $name -or $names.ContainsKey($name)) { continue }
+    $names[$name] = 1
+    $cls = ''
+    if ($d.Id -notlike 'BluetoothLE*') {
+      $bd = Await ([Windows.Devices.Bluetooth.BluetoothDevice]::FromIdAsync($d.Id)) ([Windows.Devices.Bluetooth.BluetoothDevice]) 3000
+      if ($bd) { $cls = [string]$bd.ClassOfDevice.MajorClass + '/' + [string]$bd.ClassOfDevice.MinorClass; $bd.Dispose() }
+    }
+    $out += @{ id = $d.Id; name = $name; cls = $cls; paired = [bool]$d.Properties['System.Devices.Aep.IsPaired']; connected = [bool]$d.Properties['System.Devices.Aep.IsConnected'] }
+  }
+  @{ devices = $out; events = $n; total = $seen.Count }
+}
 function Wifi {
   $null = Await ([Windows.Devices.WiFi.WiFiAdapter]::RequestAccessAsync()) ([Windows.Devices.WiFi.WiFiAccessStatus])
   $ads = Await ([Windows.Devices.WiFi.WiFiAdapter]::FindAllAdaptersAsync()) ([System.Collections.Generic.IReadOnlyList[Windows.Devices.WiFi.WiFiAdapter]])
@@ -81,8 +121,7 @@ const btScript = `
 $act = $env:TVHUB_ACT; $id = $env:TVHUB_ID
 switch ($act) {
   'scan' {
-    # Поиск: Windows опрашивает эфир несколько секунд и находит устройства в режиме сопряжения
-    Emit @{ devices = (BtList $btProto 25000) }
+    Emit (BtScan 15)
   }
   'radio' {
     $r = BtRadio
@@ -295,6 +334,8 @@ func btAction(action, id string, on bool) (map[string]any, error) {
 		Status  string  `json:"status"`
 		Error   string  `json:"error"`
 		Codes   []int64 `json:"codes"`
+		Events  int     `json:"events"` // сколько устройств нашёл поиск (для журнала)
+		Total   int     `json:"total"`
 	}
 	env := map[string]string{"TVHUB_ACT": action, "TVHUB_ID": id}
 	if on {
@@ -307,7 +348,7 @@ func btAction(action, id string, on bool) (map[string]any, error) {
 	if err := runConnPS(btScript, env, timeout, &r); err != nil {
 		return nil, err
 	}
-	log.Printf("bluetooth %s: %s %s %v", action, r.Status, r.Error, r.Codes)
+	log.Printf("bluetooth %s: %s %s %v найдено=%d/%d с именем=%d", action, r.Status, r.Error, r.Codes, r.Events, r.Total, len(r.Devices))
 	switch r.Error {
 	case "noradio":
 		return nil, errors.New("на компьютере нет Bluetooth")

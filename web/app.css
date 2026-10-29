@@ -375,6 +375,7 @@ button, input { font: inherit; color: inherit; }
 .sv-wnow { display: flex; align-items: center; gap: 1.4rem; }
 .sv-wico { width: 5rem; height: 5rem; stroke: #fff; fill: none; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 .sv-wtemp { font-size: 3.6rem; font-weight: 600; line-height: 1; }
+.sv-werr { font-size: 1rem; color: #ffffff80; margin-top: .4rem; max-width: 60rem; }
 .sv-wdesc { font-size: 1.4rem; color: #d5dae4; margin-top: .3rem; }
 .sv-fc { justify-content: flex-start; margin-top: 1.6rem; }
 .sv-fc .fc-day { background: #ffffff14; backdrop-filter: blur(10px); min-width: 7.5rem; padding: .8rem 1rem; }

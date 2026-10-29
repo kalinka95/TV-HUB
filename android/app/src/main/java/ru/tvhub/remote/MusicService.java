@@ -201,10 +201,11 @@ public class MusicService extends Service {
         PlaybackState.Builder b = new PlaybackState.Builder()
                 .setActions(actions)
                 .setState(playing ? PlaybackState.STATE_PLAYING : PlaybackState.STATE_PAUSED, posMs, playing ? 1f : 0f, SystemClock.elapsedRealtime());
-        if (liked != null) {
+        if (!title.isEmpty()) { // сердечко — всегда, пока играет трек
+            boolean on = Boolean.TRUE.equals(liked);
             b.addCustomAction(new PlaybackState.CustomAction.Builder("like",
-                    liked ? "Убрать из «Мне нравится»" : "Мне нравится",
-                    liked ? R.drawable.ic_heart_on : R.drawable.ic_heart).build());
+                    on ? "Убрать из «Мне нравится»" : "Мне нравится",
+                    on ? R.drawable.ic_heart_on : R.drawable.ic_heart).build());
         }
         session.setPlaybackState(b.build());
     }
@@ -239,7 +240,7 @@ public class MusicService extends Service {
                 .addAction(button(R.drawable.ic_prev, "Предыдущий", "prev", 1))
                 .addAction(button(playing ? R.drawable.ic_pause : R.drawable.ic_play, playing ? "Пауза" : "Играть", "playpause", 2))
                 .addAction(button(R.drawable.ic_next, "Следующий", "next", 3));
-        if (liked != null) b.addAction(button(liked ? R.drawable.ic_heart_on : R.drawable.ic_heart, "Мне нравится", "like", 4));
+        if (!none) b.addAction(button(Boolean.TRUE.equals(liked) ? R.drawable.ic_heart_on : R.drawable.ic_heart, "Мне нравится", "like", 4));
         b.setStyle(new Notification.MediaStyle().setMediaSession(session.getSessionToken()).setShowActionsInCompactView(0, 1, 2));
         Notification n = b.build();
         if (!foreground) {
@@ -284,6 +285,10 @@ public class MusicService extends Service {
             show();
         } else if ("seek".equals(a) && pos != null) {
             setState((long) (pos * 1000));
+        } else if ("like".equals(a) && shown && !title.isEmpty()) {
+            liked = !Boolean.TRUE.equals(liked);
+            setState(currentPos());
+            show();
         }
         io.execute(() -> {
             try {

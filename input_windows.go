@@ -123,6 +123,10 @@ func sendRemoteKey(k string) {
 		tapVK(uint16(k[0]), false)
 		return
 	}
+	if k == "volup" || k == "voldown" || k == "mute" {
+		volumeAction(k)
+		return
+	}
 	if d, ok := vkMap[k]; ok {
 		tapVK(d.vk, d.ext)
 	}

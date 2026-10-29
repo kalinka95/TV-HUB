@@ -299,12 +299,22 @@ func startRemoteServer() {
 	mux.HandleFunc("GET /r/api/brightness", remoteAuth(func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]any{"level": currentBrightness()})
 	}))
+	// Отчёт для разработчика: версия, погода, музыка и кнопка «Мне нравится»
+	mux.HandleFunc("GET /r/api/diag", remoteAuth(func(w http.ResponseWriter, r *http.Request) {
+		wMu.Lock()
+		werr := wLastErr
+		wMu.Unlock()
+		cfgMu.Lock()
+		city := cfg.Settings.City
+		cfgMu.Unlock()
+		writeJSON(w, map[string]any{"version": appVersion, "city": city, "weatherError": werr, "music": mediaDiag()})
+	}))
 	// Эквалайзер звука компьютера
 	mux.HandleFunc("/r/api/eq", remoteAuth(handleEQ))
 	// Музыка на пульте: что играет, управление, показать экран музыки на ноутбуке
 	mux.HandleFunc("GET /r/api/media", remoteAuth(func(w http.ResponseWriter, r *http.Request) {
 		st, ok := getMedia()
-		writeJSON(w, map[string]any{"media": st, "available": ok, "startInfo": lastWaveInfo()})
+		writeJSON(w, map[string]any{"media": displayMedia(st), "available": ok, "startInfo": lastWaveInfo()})
 	}))
 	mux.HandleFunc("POST /r/api/media", remoteAuth(func(w http.ResponseWriter, r *http.Request) {
 		var req mediaReq

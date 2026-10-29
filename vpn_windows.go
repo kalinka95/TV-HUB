@@ -483,3 +483,29 @@ func openVPNApp() error {
 	showHapp(p)
 	return nil
 }
+
+// systemProxyURL — локальный прокси VPN (Happ) в виде адреса для запросов TVHub, если он включён.
+// В настройках Windows он записан как «127.0.0.1:10809» или «http=127.0.0.1:10809;https=…».
+func systemProxyURL() string {
+	p := localProxy()
+	if p == "" {
+		return ""
+	}
+	if strings.Contains(p, "=") {
+		var pick string
+		for _, part := range strings.Split(p, ";") {
+			kv := strings.SplitN(strings.TrimSpace(part), "=", 2)
+			if len(kv) == 2 && (kv[0] == "https" || (kv[0] == "http" && pick == "")) {
+				pick = kv[1]
+			}
+		}
+		p = pick
+	}
+	if p == "" {
+		return ""
+	}
+	if !strings.Contains(p, "://") {
+		p = "http://" + p
+	}
+	return p
+}

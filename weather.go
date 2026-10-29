@@ -4,6 +4,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -39,15 +40,23 @@ var (
 	weatherBase = envOr("TVHUB_WEATHER_BASE", "https://api.open-meteo.com")
 	bingBase    = envOr("TVHUB_BING_BASE", "https://www.bing.com")
 	wttrBase    = envOr("TVHUB_WTTR_BASE", "https://wttr.in")
+	metnoBase   = envOr("TVHUB_METNO_BASE", "https://api.met.no")
 )
 
 func getJSON(ctx context.Context, u string, v any) error {
+	return getJSONc(ctx, http.DefaultClient, u, v)
+}
+
+func getJSONc(ctx context.Context, c *http.Client, u string, v any) error {
 	req, err := http.NewRequestWithContext(ctx, "GET", u, nil)
 	if err != nil {
 		return err
 	}
 	req.Header.Set("User-Agent", defaultUA)
-	resp, err := http.DefaultClient.Do(req)
+	if strings.Contains(u, "met.no") { // met.no просит, чтобы программа представлялась
+		req.Header.Set("User-Agent", "TVHub/"+appVersion+" github.com/kalinka95/TV-HUB")
+	}
+	resp, err := c.Do(req)
 	if err != nil {
 		return err
 	}
@@ -116,10 +125,64 @@ type weatherData struct {
 }
 
 var (
-	wMu    sync.Mutex
-	wCache weatherData
-	wKey   string
+	wMu      sync.Mutex
+	wCache   weatherData
+	wKey     string
+	wLastErr string // последняя ошибка — для отчёта
 )
+
+type weatherSource struct {
+	name string
+	get  func(context.Context, *http.Client, *City) (weatherData, error)
+}
+
+// fetchWeather пробует источники погоды по очереди, у каждого свои 8 секунд. Если напрямую
+// ни один не ответил, пробуем ещё раз через VPN Happ (его локальный прокси), если он включён.
+func fetchWeather(city *City) (weatherData, error) {
+	sources := []weatherSource{{"Open-Meteo", weatherOpenMeteo}, {"met.no", weatherMetNo}, {"wttr.in", weatherWttr}}
+	clients := []*http.Client{{Timeout: 8 * time.Second}}
+	if p := systemProxyURL(); p != "" {
+		if u, err := url.Parse(p); err == nil {
+			clients = append(clients, &http.Client{Timeout: 8 * time.Second, Transport: &http.Transport{Proxy: http.ProxyURL(u)}})
+		}
+	}
+	var errs []string
+	for ci, c := range clients {
+		for _, src := range sources {
+			ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+			d, err := src.get(ctx, c, city)
+			cancel()
+			if err == nil && d.Now != nil {
+				return d, nil
+			}
+			via := ""
+			if ci > 0 {
+				via = " через VPN"
+			}
+			errs = append(errs, src.name+via+": "+shortErr(err))
+		}
+	}
+	return weatherData{}, errors.New(strings.Join(errs, "; "))
+}
+
+func shortErr(err error) string {
+	if err == nil {
+		return "пустой ответ"
+	}
+	s := err.Error()
+	switch {
+	case strings.Contains(s, "deadline") || strings.Contains(s, "Timeout") || strings.Contains(s, "timeout"):
+		return "не отвечает"
+	case strings.Contains(s, "no such host"):
+		return "адрес не найден"
+	case strings.Contains(s, "refused") || strings.Contains(s, "reset") || strings.Contains(s, "forcibly"):
+		return "соединение сброшено"
+	}
+	if len(s) > 60 {
+		s = s[:60]
+	}
+	return s
+}
 
 func handleWeather(w http.ResponseWriter, r *http.Request) {
 	cfgMu.Lock()
@@ -136,42 +199,10 @@ func handleWeather(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, wCache)
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
-	defer cancel()
-	var res struct {
-		Current struct {
-			Temp  float64 `json:"temperature_2m"`
-			Feels float64 `json:"apparent_temperature"`
-			Code  int     `json:"weather_code"`
-			Wind  float64 `json:"wind_speed_10m"`
-			Hum   float64 `json:"relative_humidity_2m"`
-			IsDay int     `json:"is_day"`
-		} `json:"current"`
-		Daily struct {
-			Time []string  `json:"time"`
-			Code []int     `json:"weather_code"`
-			Max  []float64 `json:"temperature_2m_max"`
-			Min  []float64 `json:"temperature_2m_min"`
-		} `json:"daily"`
-	}
-	q := url.Values{
-		"latitude":        {fmt.Sprint(city.Lat)},
-		"longitude":       {fmt.Sprint(city.Lon)},
-		"current":         {"temperature_2m,apparent_temperature,weather_code,wind_speed_10m,relative_humidity_2m,is_day"},
-		"daily":           {"weather_code,temperature_2m_max,temperature_2m_min"},
-		"timezone":        {"auto"},
-		"forecast_days":   {"5"},
-		"wind_speed_unit": {"ms"},
-	}
-	if err := getJSON(ctx, weatherBase+"/v1/forecast?"+q.Encode(), &res); err != nil {
-		// Основной сервис погоды недоступен — пробуем запасной
-		if d, err2 := weatherWttr(ctx, city); err2 == nil {
-			wCache, wKey = d, key
-			writeJSON(w, d)
-			return
-		} else {
-			log.Printf("погода: %v; запасной сервис: %v", err, err2)
-		}
+	d, err := fetchWeather(city)
+	if err != nil {
+		wLastErr = err.Error()
+		log.Printf("погода: %v", err)
 		if wKey == key && wCache.Now != nil {
 			writeJSON(w, wCache) // нет связи — показываем последний прогноз
 			return
@@ -179,15 +210,7 @@ func handleWeather(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, weatherData{City: city, Error: "Не удалось получить погоду: " + err.Error()})
 		return
 	}
-	d := weatherData{City: city, Updated: time.Now().Unix(), Now: &weatherNow{
-		Temp: res.Current.Temp, Feels: res.Current.Feels, Code: res.Current.Code,
-		Wind: res.Current.Wind, Hum: res.Current.Hum, Day: res.Current.IsDay == 1,
-	}}
-	for i, t := range res.Daily.Time {
-		if i < len(res.Daily.Code) && i < len(res.Daily.Max) && i < len(res.Daily.Min) {
-			d.Days = append(d.Days, weatherDay{Date: t, Code: res.Daily.Code[i], Max: res.Daily.Max[i], Min: res.Daily.Min[i]})
-		}
-	}
+	wLastErr = ""
 	wCache, wKey = d, key
 	writeJSON(w, d)
 }
@@ -351,7 +374,7 @@ func handleWall(w http.ResponseWriter, r *http.Request) {
 }
 
 // weatherWttr — запасной источник погоды (wttr.in), если Open-Meteo недоступен.
-func weatherWttr(ctx context.Context, city *City) (weatherData, error) {
+func weatherWttr(ctx context.Context, c *http.Client, city *City) (weatherData, error) {
 	var res struct {
 		Current []struct {
 			Temp  string `json:"temp_C"`
@@ -370,7 +393,7 @@ func weatherWttr(ctx context.Context, city *City) (weatherData, error) {
 		} `json:"weather"`
 	}
 	u := wttrBase + "/" + fmt.Sprintf("%.4f,%.4f", city.Lat, city.Lon) + "?format=j1"
-	if err := getJSON(ctx, u, &res); err != nil {
+	if err := getJSONc(ctx, c, u, &res); err != nil {
 		return weatherData{}, err
 	}
 	if len(res.Current) == 0 {
@@ -378,11 +401,11 @@ func weatherWttr(ctx context.Context, city *City) (weatherData, error) {
 	}
 	num := func(s string) float64 { f, _ := strconv.ParseFloat(strings.TrimSpace(s), 64); return f }
 	code := func(s string) int { return wwoToWMO(int(num(s))) }
-	c := res.Current[0]
+	cc := res.Current[0]
 	h := time.Now().Hour()
 	d := weatherData{City: city, Updated: time.Now().Unix(), Now: &weatherNow{
-		Temp: num(c.Temp), Feels: num(c.Feels), Code: code(c.Code), Hum: num(c.Hum),
-		Wind: math.Round(num(c.Wind)/3.6*10) / 10, Day: h >= 7 && h < 19,
+		Temp: num(cc.Temp), Feels: num(cc.Feels), Code: code(cc.Code), Hum: num(cc.Hum),
+		Wind: math.Round(num(cc.Wind)/3.6*10) / 10, Day: h >= 7 && h < 19,
 	}}
 	for _, x := range res.Weather {
 		wc := 0
@@ -423,6 +446,175 @@ func wwoToWMO(c int) int {
 		return 75
 	case 200, 386, 389, 392:
 		return 95
+	}
+	return 3
+}
+
+// weatherOpenMeteo — основной источник погоды.
+func weatherOpenMeteo(ctx context.Context, c *http.Client, city *City) (weatherData, error) {
+	var res struct {
+		Current struct {
+			Temp  float64 `json:"temperature_2m"`
+			Feels float64 `json:"apparent_temperature"`
+			Code  int     `json:"weather_code"`
+			Wind  float64 `json:"wind_speed_10m"`
+			Hum   float64 `json:"relative_humidity_2m"`
+			IsDay int     `json:"is_day"`
+		} `json:"current"`
+		Daily struct {
+			Time []string  `json:"time"`
+			Code []int     `json:"weather_code"`
+			Max  []float64 `json:"temperature_2m_max"`
+			Min  []float64 `json:"temperature_2m_min"`
+		} `json:"daily"`
+	}
+	q := url.Values{
+		"latitude":        {fmt.Sprint(city.Lat)},
+		"longitude":       {fmt.Sprint(city.Lon)},
+		"current":         {"temperature_2m,apparent_temperature,weather_code,wind_speed_10m,relative_humidity_2m,is_day"},
+		"daily":           {"weather_code,temperature_2m_max,temperature_2m_min"},
+		"timezone":        {"auto"},
+		"forecast_days":   {"5"},
+		"wind_speed_unit": {"ms"},
+	}
+	if err := getJSONc(ctx, c, weatherBase+"/v1/forecast?"+q.Encode(), &res); err != nil {
+		return weatherData{}, err
+	}
+	d := weatherData{City: city, Updated: time.Now().Unix(), Now: &weatherNow{
+		Temp: res.Current.Temp, Feels: res.Current.Feels, Code: res.Current.Code,
+		Wind: res.Current.Wind, Hum: res.Current.Hum, Day: res.Current.IsDay == 1,
+	}}
+	for i, t := range res.Daily.Time {
+		if i < len(res.Daily.Code) && i < len(res.Daily.Max) && i < len(res.Daily.Min) {
+			d.Days = append(d.Days, weatherDay{Date: t, Code: res.Daily.Code[i], Max: res.Daily.Max[i], Min: res.Daily.Min[i]})
+		}
+	}
+	return d, nil
+}
+
+// weatherMetNo — запасной источник: норвежская метеослужба (бесплатно, без ключа).
+func weatherMetNo(ctx context.Context, c *http.Client, city *City) (weatherData, error) {
+	type sum struct {
+		Summary struct {
+			Symbol string `json:"symbol_code"`
+		} `json:"summary"`
+	}
+	var res struct {
+		Properties struct {
+			Timeseries []struct {
+				Time time.Time `json:"time"`
+				Data struct {
+					Instant struct {
+						Details struct {
+							Temp float64 `json:"air_temperature"`
+							Hum  float64 `json:"relative_humidity"`
+							Wind float64 `json:"wind_speed"`
+						} `json:"details"`
+					} `json:"instant"`
+					Next1 *sum `json:"next_1_hours"`
+					Next6 *sum `json:"next_6_hours"`
+				} `json:"data"`
+			} `json:"timeseries"`
+		} `json:"properties"`
+	}
+	u := fmt.Sprintf("%s/weatherapi/locationforecast/2.0/compact?lat=%.4f&lon=%.4f", metnoBase, city.Lat, city.Lon)
+	if err := getJSONc(ctx, c, u, &res); err != nil {
+		return weatherData{}, err
+	}
+	ts := res.Properties.Timeseries
+	if len(ts) == 0 {
+		return weatherData{}, errors.New("пустой ответ")
+	}
+	sym := func(i int) string {
+		if n := ts[i].Data.Next1; n != nil && n.Summary.Symbol != "" {
+			return n.Summary.Symbol
+		}
+		if n := ts[i].Data.Next6; n != nil {
+			return n.Summary.Symbol
+		}
+		return ""
+	}
+	// Ближайшая к текущему времени точка прогноза
+	cur := 0
+	for i := range ts {
+		if ts[i].Time.After(time.Now()) {
+			break
+		}
+		cur = i
+	}
+	det := ts[cur].Data.Instant.Details
+	sc := sym(cur)
+	d := weatherData{City: city, Updated: time.Now().Unix(), Now: &weatherNow{
+		Temp: det.Temp, Feels: det.Temp, Code: metnoToWMO(sc), Hum: det.Hum, Wind: det.Wind, Day: !strings.Contains(sc, "night"),
+	}}
+	// По дням: максимум, минимум и погода около полудня (по местному времени компьютера)
+	type agg struct {
+		max, min float64
+		code     int
+		noon     int
+	}
+	days := map[string]*agg{}
+	var order []string
+	for i, t := range ts {
+		lt := t.Time.Local()
+		k := lt.Format("2006-01-02")
+		a := days[k]
+		if a == nil {
+			if len(order) == 5 {
+				break
+			}
+			a = &agg{max: -1e9, min: 1e9, noon: 99, code: -1}
+			days[k] = a
+			order = append(order, k)
+		}
+		v := t.Data.Instant.Details.Temp
+		a.max, a.min = math.Max(a.max, v), math.Min(a.min, v)
+		if dh := int(math.Abs(float64(lt.Hour() - 13))); dh < a.noon {
+			if s := sym(i); s != "" {
+				a.noon, a.code = dh, metnoToWMO(s)
+			}
+		}
+	}
+	for _, k := range order {
+		a := days[k]
+		if a.code < 0 {
+			a.code = 3
+		}
+		d.Days = append(d.Days, weatherDay{Date: k, Code: a.code, Max: a.max, Min: a.min})
+	}
+	return d, nil
+}
+
+// metnoToWMO переводит значки met.no в коды Open-Meteo.
+func metnoToWMO(s string) int {
+	s = strings.TrimSuffix(strings.TrimSuffix(strings.TrimSuffix(s, "_day"), "_night"), "_polartwilight")
+	switch {
+	case strings.Contains(s, "thunder"):
+		return 95
+	case strings.Contains(s, "sleet"):
+		return 66
+	case s == "heavysnow" || s == "heavysnowshowers":
+		return 75
+	case s == "lightsnow" || s == "lightsnowshowers":
+		return 71
+	case strings.Contains(s, "snow"):
+		return 73
+	case s == "heavyrain" || s == "heavyrainshowers":
+		return 65
+	case s == "lightrain" || s == "lightrainshowers":
+		return 61
+	case strings.Contains(s, "rain"):
+		return 63
+	case s == "fog":
+		return 45
+	case s == "cloudy":
+		return 3
+	case s == "partlycloudy":
+		return 2
+	case s == "fair":
+		return 1
+	case s == "clearsky":
+		return 0
 	}
 	return 3
 }

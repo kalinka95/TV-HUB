@@ -25,7 +25,7 @@ import (
 )
 
 // Версию подставляет сборка на GitHub (-ldflags -X main.appVersion=…)
-var appVersion = "1.4.0"
+var appVersion = "1.4.1"
 
 //go:embed web
 var webFS embed.FS
@@ -69,16 +69,17 @@ type Settings struct {
 }
 
 type Config struct {
-	Playlists      []Playlist `json:"playlists"`
-	ActivePlaylist string     `json:"activePlaylist"`
-	Apps           []App      `json:"apps"`
-	Favorites      []string   `json:"favorites"`
-	LastChannel    string     `json:"lastChannel"`
-	Settings       Settings   `json:"settings"`
-	RemoteKey      string     `json:"remoteKey"` // секрет в ссылке пульта на телефоне
-	Reminders      []Reminder `json:"reminders,omitempty"`
-	YaMusicAdded   bool       `json:"yaMusicAdded,omitempty"`
-	ClearCity      bool       `json:"clearCity,omitempty"` // только в запросе: убрать город
+	Playlists      []Playlist      `json:"playlists"`
+	ActivePlaylist string          `json:"activePlaylist"`
+	Apps           []App           `json:"apps"`
+	Favorites      []string        `json:"favorites"`
+	LastChannel    string          `json:"lastChannel"`
+	Settings       Settings        `json:"settings"`
+	RemoteKey      string          `json:"remoteKey"` // секрет в ссылке пульта на телефоне
+	Reminders      []Reminder      `json:"reminders,omitempty"`
+	YaMusicAdded   bool            `json:"yaMusicAdded,omitempty"`
+	ClearCity      bool            `json:"clearCity,omitempty"` // только в запросе: убрать город
+	Likes          map[string]bool `json:"likes,omitempty"`     // треки, отмеченные «Мне нравится» через TVHub
 }
 
 const tvUA = "Mozilla/5.0 (SMART-TV; LINUX; Tizen 6.0) AppleWebKit/537.36 (KHTML, like Gecko) 85.0.4183.93/6.0 TV Safari/537.36"
@@ -566,6 +567,7 @@ func handleSaveConfig(w http.ResponseWriter, r *http.Request) {
 	c.Settings.Brightness = cfg.Settings.Brightness
 	c.Settings.DarkSites = cfg.Settings.DarkSites
 	c.Settings.EQ = cfg.Settings.EQ
+	c.Likes = cfg.Likes
 	if c.Settings.City == nil { // город сбрасывается только явно, не из-за устаревшей копии настроек
 		c.Settings.City = cfg.Settings.City
 	}
@@ -699,7 +701,7 @@ func startServer() (string, error) {
 	mux.HandleFunc("GET /api/wall/{name}", handleWall)
 	mux.HandleFunc("GET /api/media", apiAuth(func(w http.ResponseWriter, r *http.Request) {
 		st, ok := getMedia()
-		writeJSON(w, map[string]any{"media": st, "available": ok, "music": musicAppInfo(), "startInfo": lastWaveInfo()})
+		writeJSON(w, map[string]any{"media": displayMedia(st), "available": ok, "music": musicAppInfo(), "startInfo": lastWaveInfo()})
 	}))
 	mux.HandleFunc("POST /api/media", apiAuth(func(w http.ResponseWriter, r *http.Request) {
 		var req mediaReq

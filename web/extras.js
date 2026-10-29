@@ -447,7 +447,8 @@ function renderSaverInfo() {
     box.innerHTML = `<div class="sv-wnow">${wxIcon(d.now.code, d.now.day, 'sv-wico')}<div><div class="sv-wtemp">${tempStr(d.now.temp)}</div>` +
       `<div class="sv-wdesc">${esc(info.text)} · ${esc(d.city.name)}</div></div></div>` + forecastHTML(d, 'fc sv-fc');
   } else box.innerHTML = !S.cfg.settings.city ? '<div class="sv-wdesc">Выберите город в настройках, чтобы здесь была погода</div>'
-    : `<div class="sv-wdesc">${esc(S.cfg.settings.city.name)}: ${d && d.error ? 'погода пока не загрузилась, пробую ещё' : 'загружаю погоду…'}</div>`;
+    : `<div class="sv-wdesc">${esc(S.cfg.settings.city.name)}: ${d && d.error ? 'погода пока не загрузилась, пробую ещё' : 'загружаю погоду…'}</div>` +
+      (d && d.error ? `<div class="sv-werr">${esc(d.error.replace(/^Не удалось получить погоду: /, ''))}</div>` : '');
   // Чуть сдвигаем блок, чтобы экран не выгорал
   const m = now.getMinutes();
   $('svInfo').style.transform = `translate(${(m % 5) * 0.6}rem, ${-(m % 4) * 0.5}rem)`;
@@ -622,17 +623,26 @@ async function updateMusic() {
   if (m && m.ok && m.title) {
     const src = /yandex/i.test(m.app || '') ? 'Яндекс Музыка' : /edge/i.test(m.app || '') ? 'Microsoft Edge' : /chrome/i.test(m.app || '') ? 'Google Chrome' : (m.app || '').split('!')[0].split('\\').pop().replace(/\.exe$/i, '');
     $('muKicker').textContent = (playing ? 'Сейчас играет' : 'На паузе') + (src ? ' · ' + src : '');
-    title.textContent = m.title;
-    $('muArtist').textContent = [m.artist, m.album && m.album !== m.title ? m.album : ''].filter(Boolean).join(' — ');
+    // Название меняем вместе с обложкой: сначала она загружается, потом меняется всё сразу
+    const text = () => {
+      title.textContent = m.title;
+      $('muArtist').textContent = [m.artist, m.album && m.album !== m.title ? m.album : ''].filter(Boolean).join(' — ');
+    };
     const cover = $('muCover');
     const u = coverURL(m);
     if (u && cover.dataset.u !== u) {
       cover.dataset.u = u;
       const im = new Image();
-      im.onload = () => { if (cover.dataset.u === u) { cover.innerHTML = ''; cover.append(im); } };
+      let done = false;
+      MU.pendingU = u;
+      const swap = () => { if (done || cover.dataset.u !== u) return; done = true; MU.pendingU = ''; if (im.complete && im.naturalWidth) { cover.innerHTML = ''; cover.append(im); } text(); };
+      im.onload = swap;
+      im.onerror = swap;
+      setTimeout(swap, 2500);
       im.src = u;
       coverColors(u).then((cols) => { if (cover.dataset.u === u) setMusicColors(cols); });
-    } else if (!u && cover.dataset.u) { cover.dataset.u = ''; cover.innerHTML = '<span class="mu-note">♪</span>'; setMusicColors(null); }
+    } else if (!u && cover.dataset.u) { cover.dataset.u = ''; cover.innerHTML = '<span class="mu-note">♪</span>'; setMusicColors(null); text(); }
+    else if (MU.pendingU !== u) text(); // пока обложка грузится — оставляем прошлое название
   } else {
     $('muKicker').textContent = r.available === false ? 'Музыка' : 'Сейчас ничего не играет';
     title.textContent = r.available === false ? 'Не получается узнать, что играет' : 'Включите музыку';

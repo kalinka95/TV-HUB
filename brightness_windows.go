@@ -273,6 +273,9 @@ func keepDimmerOnTop() {
 			for _, h := range dimWins {
 				procSetWindowPos.Call(h, ^uintptr(0), 0, 0, 0, 0, 0x0001|0x0002|0x0010) // NOSIZE|NOMOVE|NOACTIVATE
 			}
+			if osdVisible { // окошко громкости — поверх затемнения
+				procSetWindowPos.Call(osdWin, ^uintptr(0), 0, 0, 0, 0, 0x0001|0x0002|0x0010)
+			}
 		})
 	}
 }

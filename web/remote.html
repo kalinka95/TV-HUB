@@ -128,6 +128,8 @@ header { display: flex; align-items: center; gap: 10px; height: 44px; flex: none
 /* Музыка */
 #v-music { overflow-y: auto; }
 .mu { position: relative; isolation: isolate; display: flex; flex-direction: column; align-items: center; text-align: center; gap: 8px; padding: 6px 0 12px; }
+.diag { position: fixed; inset: 0; z-index: 60; background: #0a0c11f2; display: grid; gap: 10px; padding: 16px; grid-template-rows: auto 1fr auto auto; }
+.diag textarea { width: 100%; box-sizing: border-box; background: var(--surface); color: var(--text); border: 1px solid var(--line); border-radius: 12px; padding: 10px; font: 12px/1.4 monospace; resize: none; }
 .mu-shade { position: relative; z-index: 2; display: grid; gap: 10px; background: #161a23e6; border-radius: 14px; padding: 12px 14px; margin-bottom: 12px; font-size: 13.5px; line-height: 1.45; color: var(--muted); text-align: left; }
 .mu-shade .key { height: 44px; font-size: 14px; }
 .mu-bgimg { position: fixed; inset: -20%; background-size: cover; background-position: center; filter: blur(60px) saturate(1.4) brightness(.55); opacity: 0; transition: opacity 1s, background-image 1s; z-index: 0; pointer-events: none; }
@@ -208,6 +210,7 @@ header { display: flex; align-items: center; gap: 10px; height: 44px; flex: none
     <button class="key hidden" id="musicToggle"></button>
     <button class="key" id="rescanBtn">Подключиться к другому компьютеру</button>
     <button class="key hidden" id="appUpdBtn">Проверить обновление приложения</button>
+    <button class="key" id="diagBtn">Отчёт для разработчика</button>
     <button class="key" id="sheetClose">Закрыть</button>
   </div>
 </div>
@@ -504,10 +507,13 @@ async function loadMusic() {
   const m = d.media || {};
   muSt = m; muAt = Date.now();
   const playing = m.status === 'Playing';
+  const src = m.coverVer ? `/r/api/media/cover?k=${encodeURIComponent(KEY)}&v=${m.coverVer}` : (m.coverUrl || '').replace(/^\/\//, 'https://');
+  const cov = $('muCover');
+  // Название меняем вместе с обложкой: пока новая обложка грузится, видно прошлый трек
+  const text = () => { $('muTitle').textContent = m.title; $('muArtist').textContent = m.artist || ''; };
   if (m.title) {
     $('muState').textContent = playing ? 'Сейчас играет' : 'На паузе';
-    $('muTitle').textContent = m.title;
-    $('muArtist').textContent = m.artist || '';
+    if (!(src && cov.dataset.want === src && cov.dataset.src !== src) && !(src && cov.dataset.want !== src)) text();
   } else {
     $('muState').textContent = 'Ничего не играет';
     $('muTitle').textContent = 'Включите музыку';
@@ -516,20 +522,26 @@ async function loadMusic() {
   const info = $('muInfo');
   info.textContent = !m.title && d.startInfo ? d.startInfo : '';
   info.classList.toggle('hidden', !info.textContent);
-  const src = m.coverVer ? `/r/api/media/cover?k=${encodeURIComponent(KEY)}&v=${m.coverVer}` : (m.coverUrl || '').replace(/^\/\//, 'https://');
-  const cov = $('muCover');
   if (src && cov.dataset.want !== src) {
     // Сначала загружаем картинку, потом показываем — без пустого квадрата
     cov.dataset.want = src;
     const im = new Image();
-    im.onload = () => {
-      if (cov.dataset.want !== src) return;
+    let done = false;
+    const swap = () => {
+      if (done || cov.dataset.want !== src) return;
+      done = true;
       cov.dataset.src = src;
-      cov.innerHTML = '';
-      cov.append(im);
-      $('muBgImg').style.backgroundImage = `url("${src}")`;
-      $('muBgImg').classList.add('on');
+      if (im.complete && im.naturalWidth) {
+        cov.innerHTML = '';
+        cov.append(im);
+        $('muBgImg').style.backgroundImage = `url("${src}")`;
+        $('muBgImg').classList.add('on');
+      }
+      if (m.title) text();
     };
+    im.onload = swap;
+    im.onerror = swap;
+    setTimeout(swap, 2500);
     im.src = src;
   } else if (!src && cov.dataset.src) {
     cov.dataset.want = '';
@@ -637,6 +649,31 @@ function checkShade() {
   b.onclick = () => { buzz(); act && act(); setTimeout(checkShade, 3000); };
 }
 document.querySelector('#tabs [data-v="music"]').addEventListener('click', checkShade);
+
+// Отчёт для разработчика: что TVHub видит про музыку, сердечко и погоду — его можно скопировать и прислать
+$('diagBtn').addEventListener('click', async () => {
+  $('sheet').classList.add('hidden');
+  let text = '';
+  try {
+    const r = await fetch('/r/api/diag', { headers: { 'X-Remote': KEY } });
+    text = JSON.stringify(await r.json(), null, 1);
+  } catch (e) { text = 'Не удалось получить отчёт: ' + e.message; }
+  const d = document.createElement('div');
+  d.className = 'diag';
+  d.innerHTML = '<p class="note">Скопируйте этот текст и пришлите разработчику.</p><textarea readonly></textarea><button class="key primary">Скопировать</button><button class="key">Закрыть</button>';
+  const ta = d.querySelector('textarea');
+  ta.value = text;
+  const [copy, close] = d.querySelectorAll('button');
+  copy.onclick = async () => {
+    ta.select();
+    let ok = false;
+    try { await navigator.clipboard.writeText(text); ok = true; } catch (e) { try { ok = document.execCommand('copy'); } catch (e2) {} }
+    toast(ok ? 'Скопировано' : 'Выделите текст и скопируйте вручную');
+  };
+  close.onclick = () => d.remove();
+  document.body.append(d);
+});
+
 document.addEventListener('visibilitychange', () => { if (!document.hidden) checkShade(); });
 checkShade();
 

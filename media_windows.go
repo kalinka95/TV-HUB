@@ -434,7 +434,7 @@ const likeJS = `((click, title) => {
   const find = () => [...document.querySelectorAll('button,[role=button]')].find((b) => vis(b) && inBar(b)
     && /like|нрав|лайк|избран|favorite/.test(label(b)) && !/dislike|не нрав|дизлайк/.test(label(b)));
   const cls = (e) => String(e.className && e.className.baseVal !== undefined ? e.className.baseVal : e.className || '');
-  const fp = (b) => label(b) + '|' + (b.getAttribute('aria-pressed') || '') + (b.getAttribute('aria-checked') || '') + '|' + cls(b).replace(/\b\S*focus\S*/gi, '') + '|' +
+  const fp = (b) => label(b) + '|' + (b.getAttribute('aria-pressed') || '') + (b.getAttribute('aria-checked') || '') + '|' + cls(b).replace(/\S*(focus|hover|anim|transition|pressed-anim)\S*/gi, '').replace(/\s+/g, ' ') + '|' +
     [...b.querySelectorAll('svg,use,path')].map((e) => (e.getAttribute('href') || e.getAttribute('xlink:href') || '') + cls(e) + (e.getAttribute('fill') || '') + (e.getAttribute('d') || '').slice(0, 40)).join(',');
   const guess = (b) => b.getAttribute('aria-pressed') === 'true' || b.getAttribute('aria-checked') === 'true'
     || /_on\b|(^|\s)(active|liked|checked)\b|isLiked|_liked|_active|filled/i.test(cls(b) + ' ' + [...b.querySelectorAll('svg,use')].map((e) => cls(e) + (e.getAttribute('href') || e.getAttribute('xlink:href') || '')).join(' '))
@@ -483,12 +483,33 @@ func evalLike(t cdpTarget, click bool, title string) string {
 }
 
 var (
-	likeMu    sync.Mutex
-	likeTitle string
-	likeAt    time.Time
-	likeVal   *bool
-	likeMem   = map[string]bool{} // что отмечали через TVHub: «название|исполнитель» → отмечен
+	likeMu      sync.Mutex
+	likeTitle   string
+	likeAt      time.Time
+	likeVal     *bool
+	likeClickAt time.Time
 )
+
+// Что отмечали через TVHub: «название|исполнитель» → отмечен. Хранится в настройках.
+func likeMemGet(k string) (bool, bool) {
+	cfgMu.Lock()
+	defer cfgMu.Unlock()
+	v, ok := cfg.Likes[k]
+	return v, ok
+}
+
+func likeMemSet(k string, on bool) {
+	cfgMu.Lock()
+	defer cfgMu.Unlock()
+	if cfg.Likes == nil {
+		cfg.Likes = map[string]bool{}
+	}
+	if len(cfg.Likes) > 3000 { // не даём списку расти бесконечно
+		cfg.Likes = map[string]bool{}
+	}
+	cfg.Likes[k] = on
+	saveConfigLocked()
+}
 
 func likeKey(st mediaState) string { return st.Title + "|" + st.Artist }
 
@@ -515,11 +536,11 @@ func likeState(st mediaState) *bool {
 			on = true
 		case v == "off":
 			on = false
-			if mem, ok := likeMem[likeKey(st)]; ok && mem {
+			if mem, ok := likeMemGet(likeKey(st)); ok && mem && time.Since(likeClickAt) < 10*time.Second {
 				on = mem // страница могла не успеть обновить кнопку
 			}
 		default: // по виду кнопки не понять — берём то, что помним
-			on = likeMem[likeKey(st)]
+			on, _ = likeMemGet(likeKey(st))
 		}
 		likeVal = &on
 		break
@@ -538,9 +559,7 @@ func mediaLike() (bool, error) {
 		if before == "none" {
 			continue
 		}
-		likeMu.Lock()
-		was, known := likeMem[likeKey(st)]
-		likeMu.Unlock()
+		was, known := likeMemGet(likeKey(st))
 		if before == "unknown" {
 			before = "off"
 			if known && was {
@@ -555,9 +574,9 @@ func mediaLike() (bool, error) {
 				on = after == "on"
 			}
 		}
+		likeMemSet(likeKey(st), on)
 		likeMu.Lock()
-		likeMem[likeKey(st)] = on
-		likeTitle, likeAt, likeVal = likeKey(st), time.Now(), &on
+		likeTitle, likeAt, likeVal, likeClickAt = likeKey(st), time.Now(), &on, time.Now()
 		likeMu.Unlock()
 		return on, nil
 	}
@@ -588,7 +607,7 @@ func mediaAction(a string) error {
 		tapVK(map[string]uint16{"playpause": 0xB3, "next": 0xB0, "prev": 0xB1}[a], true)
 		return nil
 	case "volup", "voldown", "mute":
-		tapVK(map[string]uint16{"volup": 0xAF, "voldown": 0xAE, "mute": 0xAD}[a], true)
+		volumeAction(a) // без большого окна Windows — со своим окошком громкости
 		return nil
 	}
 	return errors.New("неизвестная команда")
@@ -937,4 +956,38 @@ func focusPID(pid uint32) bool {
 func musicAppInfo() map[string]any {
 	exe := findYandexMusic()
 	return map[string]any{"desktop": exe != ""}
+}
+
+// likeDiagJS — что видно на странице про кнопку «Мне нравится» (для отчёта разработчику).
+const likeDiagJS = `(() => {
+  const m = navigator.mediaSession && navigator.mediaSession.metadata;
+  const label = (b) => ((b.getAttribute('aria-label') || '') + ' ' + (b.title || '') + ' ' + (b.getAttribute('data-test-id') || '')).toLowerCase();
+  const like = [...document.querySelectorAll('button,[role=button]')].filter((b) => /like|нрав|лайк|избран|favorite/.test(label(b)));
+  const short = (b) => b.outerHTML.replace(/<path[^>]*d="([^"]{0,30})[^"]*"/g, '<path d="$1…"').slice(0, 500);
+  let on = '', off = '';
+  try { on = localStorage.getItem('tvhubLikeOn') || ''; off = localStorage.getItem('tvhubLikeOff') || ''; } catch (e) {}
+  return JSON.stringify({ url: location.host + location.pathname, title: m ? m.title : '', buttons: like.slice(0, 6).map(short), learnedOn: on.slice(0, 300), learnedOff: off.slice(0, 300) });
+})()`
+
+// mediaDiag собирает отчёт о музыке и погоде, который можно прислать разработчику.
+func mediaDiag() map[string]any {
+	st, _ := getMedia()
+	out := map[string]any{"title": st.Title, "artist": st.Artist, "app": st.App, "liked": st.Liked}
+	var pages []any
+	for _, t := range musicTargets() {
+		res, err := cdpCall(t.WS, "Runtime.evaluate", map[string]any{"expression": likeDiagJS, "returnByValue": true})
+		if err != nil {
+			pages = append(pages, "ошибка: "+err.Error())
+			continue
+		}
+		var r struct {
+			Result struct {
+				Value string `json:"value"`
+			} `json:"result"`
+		}
+		json.Unmarshal(res, &r)
+		pages = append(pages, json.RawMessage(r.Result.Value))
+	}
+	out["pages"] = pages
+	return out
 }

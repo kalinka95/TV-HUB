@@ -6,7 +6,6 @@ package main
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,7 +17,6 @@ import (
 	"sync"
 	"syscall"
 	"time"
-	"unicode/utf16"
 )
 
 // Общее начало сценариев: ожидание асинхронных операций WinRT и нужные типы.
@@ -305,14 +303,21 @@ switch ($act) {
 func runConnPS(script string, env map[string]string, timeout time.Duration, out any) error {
 	ps := filepath.Join(os.Getenv("SystemRoot"), `System32\WindowsPowerShell\v1.0\powershell.exe`)
 	full := strings.ReplaceAll(connPrelude, "{BT}", "`") + script
-	u := utf16.Encode([]rune(full))
-	b := make([]byte, len(u)*2)
-	for i, c := range u {
-		b[2*i], b[2*i+1] = byte(c), byte(c>>8)
+	// Сценарий длинный — в командную строку Windows (до 32 тысяч символов) он не влезает,
+	// поэтому запускаем его из временного файла. Метка BOM — чтобы PowerShell прочитал UTF-8.
+	f, err := os.CreateTemp(dataDir, "conn-*.ps1")
+	if err != nil {
+		return fmt.Errorf("не удалось подготовить запрос к Windows: %v", err)
+	}
+	defer os.Remove(f.Name())
+	_, err = f.WriteString("\uFEFF" + full)
+	f.Close()
+	if err != nil {
+		return fmt.Errorf("не удалось подготовить запрос к Windows: %v", err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, ps, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", base64.StdEncoding.EncodeToString(b))
+	cmd := exec.CommandContext(ctx, ps, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", f.Name())
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: createNoWindow}
 	cmd.Env = os.Environ()
 	for k, v := range env {

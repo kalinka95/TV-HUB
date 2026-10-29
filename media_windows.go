@@ -457,6 +457,10 @@ const likeJS = `((click, title) => {
     || /удалить|убрать|remove|unlike/.test(label(b));
   const store = (k, v) => { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) { return null; } };
   const state = (b) => {
+    // Стандартная пометка «кнопка нажата» — самый надёжный признак, если она есть
+    const ap = b.getAttribute('aria-pressed') || b.getAttribute('aria-checked');
+    if (ap === 'true') return 'on';
+    if (ap === 'false') return 'off';
     const f = fp(b), on = store('tvhubLikeOn'), off = store('tvhubLikeOff');
     if (on && f === on) return 'on';
     if (off && f === off) return 'off';
@@ -988,7 +992,8 @@ const likeDiagJS = `(() => {
   const short = (b) => b.outerHTML.replace(/<path[^>]*d="([^"]{0,30})[^"]*"/g, '<path d="$1…"').slice(0, 500);
   let on = '', off = '';
   try { on = localStorage.getItem('tvhubLikeOn') || ''; off = localStorage.getItem('tvhubLikeOff') || ''; } catch (e) {}
-  return JSON.stringify({ url: location.host + location.pathname, title: m ? m.title : '', buttons: like.slice(0, 6).map(short), learnedOn: on.slice(0, 300), learnedOff: off.slice(0, 300) });
+  return JSON.stringify({ url: location.host + location.pathname, title: m ? m.title : '', buttons: like.slice(0, 6).map(short), learnedOn: on.slice(0, 300), learnedOff: off.slice(0, 300),
+    state: (` + likeJS + `)(false, '') });
 })()`
 
 // mediaDiag собирает отчёт о музыке и погоде, который можно прислать разработчику.

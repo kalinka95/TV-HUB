@@ -563,7 +563,11 @@ function appMenu(app) {
   // Сайт пишет «браузер не поддерживается» или не пускает в аккаунт — открывать как обычный Edge
   if (app.type === 'web') {
     const auto = /(^|\.)twitch\.tv$/i.test((() => { try { return new URL(app.target).hostname; } catch (e) { return ''; } })());
-    if (!auto) items.push({ label: app.plain ? 'Обычный браузер: вкл' : 'Обычный браузер: выкл', act: () => {
+    items.push({ label: app.inside ? 'Внутри TVHub (проба): вкл' : 'Внутри TVHub (проба): выкл', act: () => {
+      app.inside = !app.inside; saveCfg();
+      toast(app.inside ? 'Сайт будет открываться прямо в окне TVHub. «Домой» — вернуться. Если видео не играет — выключите этот режим' : 'Сайт снова открывается в Edge', 6000);
+    } });
+    if (!auto && !app.inside) items.push({ label: app.plain ? 'Обычный браузер: вкл' : 'Обычный браузер: выкл', act: () => {
       app.plain = !app.plain; saveCfg();
       toast(app.plain ? 'Сайт будет открываться как обычный Edge — если он не пускал в аккаунт, попробуйте снова' : 'Сайт снова открывается как раньше', 5000);
     } });
@@ -1647,7 +1651,8 @@ async function init() {
   startExtras();
   // Пока грузились каналы, пользователь ничего не нажимал — ставим фокус на первый ряд
   if (S.screen === 'main' && !userMoved && S.tab === 'home') { $('homeRows').scrollTop = 0; focusFirst($('homeRows')); }
-  if (S.cfg.settings.resumeLastChannel && S.screen === 'main') {
+  const returned = runHashCommand();
+  if (S.cfg.settings.resumeLastChannel && S.screen === 'main' && !returned) {
     const ch = S.channels.find((c) => c.url === S.cfg.lastChannel);
     if (ch) playChannel(ch, S.channels);
   }
@@ -1655,3 +1660,18 @@ async function init() {
 }
 
 init();
+
+// Команда в адресе после «#»: TVHub вернулся с сайта, открытого внутри окна, и должен сразу
+// выполнить то, что нажали на пульте (поиск, канал, вкладка).
+function runHashCommand() {
+  const raw = decodeURIComponent((location.hash || '').slice(1).replace(/\+/g, ' '));
+  if (!raw) return false;
+  history.replaceState(null, '', location.pathname + location.search);
+  const i = raw.indexOf(':'), cmd = i < 0 ? raw : raw.slice(0, i), arg = i < 0 ? '' : raw.slice(i + 1);
+  if (cmd === 'search') openSearch(arg);
+  else if (cmd === 'tv') tvNow();
+  else if (cmd === 'play') onPlayEvent({ url: arg });
+  else if (cmd === 'show') window.tvShow(arg);
+  else if (cmd === 'home') { lastAppId = arg; focusByKey('happ:' + arg, $('main')); }
+  return true;
+}

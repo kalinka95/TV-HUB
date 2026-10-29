@@ -350,19 +350,19 @@ func startRemoteServer() {
 		var req struct{ Q string }
 		json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&req)
 		tvFront()
-		pushEvent(map[string]any{"type": "search", "q": req.Q})
+		uiEvent(map[string]any{"type": "search", "q": req.Q}, "search:"+req.Q)
 		remoteReply(w)
 	}))
 	mux.HandleFunc("POST /r/api/tv", remoteAuth(func(w http.ResponseWriter, r *http.Request) {
 		tvFront()
-		pushEvent(map[string]any{"type": "tv"})
+		uiEvent(map[string]any{"type": "tv"}, "tv")
 		remoteReply(w)
 	}))
 	mux.HandleFunc("POST /r/api/play", remoteAuth(func(w http.ResponseWriter, r *http.Request) {
 		var req struct{ URL string }
 		json.NewDecoder(io.LimitReader(r.Body, 8192)).Decode(&req)
 		tvFront()
-		pushEvent(map[string]any{"type": "play", "url": req.URL})
+		uiEvent(map[string]any{"type": "play", "url": req.URL}, "play:"+req.URL)
 		remoteReply(w)
 	}))
 	// Эквалайзер звука компьютера

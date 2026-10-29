@@ -847,6 +847,7 @@ function renderExtraSettings(inner) {
   inner.append(sv);
 
   eqSection(inner);
+  insideSection(inner);
   themeSection(inner);
   updateSection(inner);
 
@@ -1104,4 +1105,48 @@ function startExtras() {
   setTimeout(showWhatsNew, 1500);
   $('weatherBtn')._onfocus = null;
   if (!cur || !cur.isConnected) setWelcomeHero();
+}
+
+
+// ---------- Встроенный браузер (сайты внутри окна TVHub) ----------
+
+const DRM = { res: null, busy: false };
+
+// Какие системы защиты фильмов есть во встроенном движке: от этого зависит, будут ли
+// онлайн-кинотеатры показывать фильмы прямо в окне TVHub.
+async function drmCheck() {
+  const cfg = [{ initDataTypes: ['cenc'],
+    audioCapabilities: [{ contentType: 'audio/mp4; codecs="mp4a.40.2"' }],
+    videoCapabilities: [{ contentType: 'video/mp4; codecs="avc1.42E01E"' }] }];
+  const test = async (key) => {
+    if (!navigator.requestMediaKeySystemAccess) return false;
+    try { await navigator.requestMediaKeySystemAccess(key, cfg); return true; } catch (e) { return false; }
+  };
+  return {
+    widevine: await test('com.widevine.alpha'),
+    playready: (await test('com.microsoft.playready.recommendation')) || (await test('com.microsoft.playready')),
+  };
+}
+
+function insideSection(inner) {
+  const sec = el('div', 's-section');
+  sec.append(el('h2', '', 'Встроенный браузер (проба)'));
+  sec.append(el('p', 'note', 'Сайт можно открывать прямо в окне TVHub, без отдельного Edge: «Меню» на карточке сайта → «Внутри TVHub». ' +
+    '«Домой» возвращает на главный экран, «Назад» — на прошлую страницу сайта. Онлайн-кинотеатры защищают фильмы от копирования — посмотрите ниже, что умеет встроенный браузер на этом компьютере.'));
+  inner.append(sec);
+  const r = DRM.res;
+  if (!r) {
+    sec.append(el('p', 'note', 'Проверяю защиту фильмов…'));
+    if (!DRM.busy) {
+      DRM.busy = true;
+      drmCheck().then((x) => { DRM.res = x; }).catch(() => { DRM.res = { widevine: false, playready: false }; })
+        .finally(() => { DRM.busy = false; if (S.tab === 'settings') keepFocus(renderSettings); });
+    }
+    return;
+  }
+  const yes = (v) => (v ? '<b style="color:#2fbf71">есть</b>' : '<b style="color:#ff5a5f">нет</b>');
+  sec.append(el('p', 'note', `Защита Widevine (как в Chrome и Android TV): ${yes(r.widevine)}<br>Защита PlayReady (как в Edge и Smart TV): ${yes(r.playready)}<br>` +
+    (r.widevine || r.playready
+      ? 'Онлайн-кинотеатры могут заработать внутри TVHub — попробуйте. Если фильм не запускается, выключите для этого сайта «Внутри TVHub».'
+      : 'Фильмы онлайн-кинотеатров внутри TVHub, скорее всего, не запустятся — оставьте их в Edge. Внутри TVHub хорошо работают YouTube, VK Видео, Rutube, Twitch.')));
 }

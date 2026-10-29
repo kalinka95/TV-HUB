@@ -112,6 +112,10 @@ var vkMap = map[string]vkDef{
 
 func sendRemoteKey(k string) {
 	if k == "back" {
+		if tvhubInFront() && insideOpen() {
+			tapVK(0x25, true, 0x12) // Alt+← — назад по страницам сайта
+			return
+		}
 		if tvhubInFront() {
 			tapVK(0x1B, false) // Esc — «Назад» в TVHub
 		} else {
@@ -134,7 +138,7 @@ func sendRemoteKey(k string) {
 
 // sendRemoteText печатает текст с клавиатуры телефона в активное окно (любой язык).
 func sendRemoteText(t string) {
-	if tvhubInFront() { // в самом TVHub (поиск каналов, поля настроек) — передаём текст напрямую
+	if tvhubInFront() && !insideOpen() { // в самом TVHub (поиск каналов, поля настроек) — передаём текст напрямую
 		pushEvent(map[string]string{"type": "text", "text": t})
 		return
 	}

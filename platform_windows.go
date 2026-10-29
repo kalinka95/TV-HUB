@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -176,6 +177,9 @@ func closeWebApp() {
 var keepWebApps bool
 
 func launchApp(a App) (err error) {
+	if a.Inside && a.Type == "web" {
+		return openInside(a)
+	}
 	// Пока приложение открывается, TVHub с заставкой — поверх всех окон
 	curtainUp()
 	defer func() {
@@ -310,6 +314,10 @@ func goHome() {
 	if wv == nil {
 		return
 	}
+	if leaveInside("") { // был открыт сайт внутри TVHub — возвращаемся на главный экран
+		curtainCancel()
+		return
+	}
 	curtainCancel()
 	go pauseWebApps() // окна остаются в фоне, видео и звук — на паузе
 	cfgMu.Lock()
@@ -402,7 +410,8 @@ func runPlatform() {
 	}
 	go homeHotkeyLoop()
 
-	wv.Navigate(strings.TrimSpace(addr))
+	uiURL = strings.TrimSpace(addr)
+	wv.Navigate(uiURL)
 	wv.Run()
 	closeWebApp()
 	resetBrightness() // программное затемнение не должно остаться после выхода
@@ -462,9 +471,77 @@ func showScreen(name string) {
 	if wv == nil {
 		return
 	}
+	if leaveInside("show:" + name) {
+		return
+	}
 	go pauseWebApps()
 	wv.Dispatch(func() {
 		bringToFront()
 		wv.Eval("window.tvShow && window.tvShow(" + strconv.Quote(name) + ")")
 	})
+}
+
+// ---------- Сайты внутри TVHub (встроенный браузер, проба) ----------
+
+var (
+	uiURL    string // адрес главного экрана TVHub
+	insideMu sync.Mutex
+	insideID string // какой сайт сейчас открыт прямо в окне TVHub
+)
+
+// openInside открывает сайт прямо в окне TVHub. «Домой» возвращает главный экран.
+func openInside(a App) error {
+	if wv == nil {
+		return errors.New("окно TVHub ещё не готово")
+	}
+	insideMu.Lock()
+	insideID = a.ID
+	insideMu.Unlock()
+	target := a.Target
+	go func() {
+		time.Sleep(600 * time.Millisecond) // пусть на экране успеет появиться заставка перехода
+		wv.Dispatch(func() {
+			bringToFront()
+			wv.Navigate(target)
+		})
+	}()
+	return nil
+}
+
+func insideOpen() bool {
+	insideMu.Lock()
+	defer insideMu.Unlock()
+	return insideID != ""
+}
+
+// leaveInside: если в окне TVHub открыт сайт — возвращает главный экран и передаёт ему команду
+// (после «#» в адресе, главный экран выполнит её при загрузке). true — сайт был открыт.
+func leaveInside(cmd string) bool {
+	insideMu.Lock()
+	id := insideID
+	insideID = ""
+	insideMu.Unlock()
+	if id == "" || wv == nil || uiURL == "" {
+		return false
+	}
+	if cmd == "" {
+		cmd = "home:" + id // просто вернулись: фокус на карточку этого сайта, канал сам не включаем
+	}
+	u := uiURL
+	if cmd != "" {
+		u += "#" + url.QueryEscape(cmd)
+	}
+	wv.Dispatch(func() {
+		bringToFront()
+		wv.Navigate(u)
+	})
+	return true
+}
+
+// uiEvent — команда главному экрану. Если в окне открыт сайт, сначала возвращаемся на главный экран.
+func uiEvent(ev map[string]any, cmd string) {
+	if leaveInside(cmd) {
+		return
+	}
+	pushEvent(ev)
 }

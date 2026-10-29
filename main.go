@@ -25,7 +25,7 @@ import (
 )
 
 // Версию подставляет сборка на GitHub (-ldflags -X main.appVersion=…)
-var appVersion = "1.4.9"
+var appVersion = "1.5.0"
 
 //go:embed web
 var webFS embed.FS
@@ -46,7 +46,8 @@ type App struct {
 	Args      string `json:"args,omitempty"`
 	UserAgent string `json:"userAgent,omitempty"`
 	Color     string `json:"color,omitempty"`
-	Plain     bool   `json:"plain,omitempty"` // обычный браузер: без управления TVHub (для сайтов, которые его не любят)
+	Plain     bool   `json:"plain,omitempty"`  // обычный браузер: без управления TVHub (для сайтов, которые его не любят)
+	Inside    bool   `json:"inside,omitempty"` // открывать прямо в окне TVHub (встроенный браузер, проба)
 }
 
 type Settings struct {

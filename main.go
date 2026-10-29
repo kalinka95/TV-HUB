@@ -25,7 +25,7 @@ import (
 )
 
 // Версию подставляет сборка на GitHub (-ldflags -X main.appVersion=…)
-var appVersion = "1.5.5"
+var appVersion = "1.6.0"
 
 //go:embed web
 var webFS embed.FS
@@ -52,23 +52,24 @@ type App struct {
 }
 
 type Settings struct {
-	Autostart         bool   `json:"autostart"`
-	Fullscreen        bool   `json:"fullscreen"`
-	ResumeLastChannel bool   `json:"resumeLastChannel"`
-	KeepAdSound       bool   `json:"keepAdSound"`    // false = глушить звук на рекламных вставках
-	PhoneRemoteOff    bool   `json:"phoneRemoteOff"` // false = пульт на телефоне включён
-	VPNPath           string `json:"vpnPath,omitempty"`
-	RunAsAdmin        bool   `json:"runAsAdmin,omitempty"`
-	LatinNames        bool   `json:"latinNames,omitempty"`   // true = оставить названия каналов как в плейлисте
-	EPGURL            string `json:"epgUrl,omitempty"`       // своя ссылка на телепрограмму (XMLTV)
-	SaverMinutes      int    `json:"saverMinutes,omitempty"` // через сколько минут заставка (0 = 10 мин, -1 = выкл)
-	City              *City  `json:"city,omitempty"`         // город для погоды
-	AutoUpdateOff     bool   `json:"autoUpdateOff,omitempty"`
-	Brightness        int    `json:"brightness,omitempty"` // 10–100, 0 = 100
-	DarkSites         bool   `json:"darkSites,omitempty"`  // Edge затемняет сайты без своей тёмной темы
-	VPNForRu          bool   `json:"vpnForRu,omitempty"`   // true = российские сервисы тоже через VPN
-	VPNHidden         bool   `json:"vpnHidden,omitempty"`
-	EQ                *EQ    `json:"eq,omitempty"` // эквалайзер (Equalizer APO)
+	Autostart         bool    `json:"autostart"`
+	Fullscreen        bool    `json:"fullscreen"`
+	ResumeLastChannel bool    `json:"resumeLastChannel"`
+	KeepAdSound       bool    `json:"keepAdSound"`    // false = глушить звук на рекламных вставках
+	PhoneRemoteOff    bool    `json:"phoneRemoteOff"` // false = пульт на телефоне включён
+	VPNPath           string  `json:"vpnPath,omitempty"`
+	RunAsAdmin        bool    `json:"runAsAdmin,omitempty"`
+	LatinNames        bool    `json:"latinNames,omitempty"`   // true = оставить названия каналов как в плейлисте
+	EPGURL            string  `json:"epgUrl,omitempty"`       // своя ссылка на телепрограмму (XMLTV)
+	SaverMinutes      int     `json:"saverMinutes,omitempty"` // через сколько минут заставка (0 = 10 мин, -1 = выкл)
+	City              *City   `json:"city,omitempty"`         // город для погоды
+	AutoUpdateOff     bool    `json:"autoUpdateOff,omitempty"`
+	Brightness        int     `json:"brightness,omitempty"` // 10–100, 0 = 100
+	DarkSites         bool    `json:"darkSites,omitempty"`  // Edge затемняет сайты без своей тёмной темы
+	VPNForRu          bool    `json:"vpnForRu,omitempty"`   // true = российские сервисы тоже через VPN
+	VPNHidden         bool    `json:"vpnHidden,omitempty"`
+	EQ                *EQ     `json:"eq,omitempty"`     // эквалайзер (Equalizer APO)
+	OwnVPN            *OwnVPN `json:"ownVpn,omitempty"` // свой VPN (Xray) вместо Happ
 }
 
 type Config struct {
@@ -571,6 +572,7 @@ func handleSaveConfig(w http.ResponseWriter, r *http.Request) {
 	c.Settings.Brightness = cfg.Settings.Brightness
 	c.Settings.DarkSites = cfg.Settings.DarkSites
 	c.Settings.EQ = cfg.Settings.EQ
+	c.Settings.OwnVPN = cfg.Settings.OwnVPN // меняется только через /api/ownvpn
 	c.Likes = cfg.Likes
 	c.DeletedPlaylists = deletedPlaylists(cfg.DeletedPlaylists, cfg.Playlists, c.Playlists)
 	if c.Settings.City == nil { // город сбрасывается только явно, не из-за устаревшей копии настроек
@@ -744,10 +746,26 @@ func startServer() (string, error) {
 		w.Header().Set("Cache-Control", "max-age=3600")
 		w.Write(b)
 	})
-	mux.HandleFunc("GET /api/vpn", apiAuth(func(w http.ResponseWriter, r *http.Request) { writeJSON(w, vpnStatus()) }))
+	mux.HandleFunc("/api/ownvpn", apiAuth(handleOwnVPN))
+	mux.HandleFunc("GET /api/vpn", apiAuth(func(w http.ResponseWriter, r *http.Request) { writeJSON(w, anyVPNStatus()) }))
 	mux.HandleFunc("POST /api/vpn", apiAuth(func(w http.ResponseWriter, r *http.Request) {
 		var req struct{ On, Open bool }
 		json.NewDecoder(io.LimitReader(r.Body, 1024)).Decode(&req)
+		if ownVPNConfigured() { // свой VPN: кнопка на главном экране включает и выключает его
+			v := ownVPNConf()
+			v.On = req.On
+			saveOwnVPN(v)
+			if v.On {
+				happOffForOwn()
+			}
+			err := ownVPNApply()
+			st := anyVPNStatus()
+			if err != nil {
+				st["error"] = err.Error()
+			}
+			writeJSON(w, st)
+			return
+		}
 		if req.Open { // показать окно Happ
 			if err := openVPNApp(); err != nil {
 				writeJSON(w, map[string]any{"error": err.Error()})
@@ -839,4 +857,20 @@ func deletedPlaylists(prev, before, after []Playlist) []Playlist {
 		add(p)
 	}
 	return out
+}
+
+// anyVPNStatus — для кнопки VPN на главном экране: свой VPN, если он настроен, иначе Happ.
+func anyVPNStatus() map[string]any {
+	if !ownVPNConfigured() {
+		return vpnStatus()
+	}
+	o := ownVPNStatus()
+	name := "TVHub"
+	if list := ownServerList(); len(list) > 0 {
+		v := ownVPNConf()
+		if v.Server >= 0 && v.Server < len(list) {
+			name = list[v.Server].Name
+		}
+	}
+	return map[string]any{"found": true, "own": true, "name": "TVHub", "server": name, "on": o["on"], "running": o["want"], "busy": o["busy"], "error": o["error"]}
 }

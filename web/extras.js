@@ -1150,3 +1150,69 @@ function insideSection(inner) {
       ? 'Онлайн-кинотеатры могут заработать внутри TVHub — попробуйте. Если фильм не запускается, включите для этого сайта «Открывать в Edge».'
       : 'Фильмы онлайн-кинотеатров внутри TVHub, скорее всего, не запустятся — оставьте их в Edge. Внутри TVHub хорошо работают YouTube, VK Видео, Rutube, Twitch.')));
 }
+
+
+// ---------- Свой VPN (Xray, без Happ) ----------
+
+const OV = { st: null, loading: false, busy: false };
+
+async function ovPost(body, okText) {
+  if (OV.busy) return;
+  OV.busy = true;
+  toast(body.sub !== undefined ? 'Загружаю серверы из подписки…' : body.on ? 'Включаю VPN… В первый раз TVHub скачает движок Xray — это займёт минуту' : 'Секунду…', 6000);
+  try {
+    const r = await api.post('/api/ownvpn', body);
+    OV.st = r;
+    if (r.error) toast(r.error, 8000);
+    else if (okText) toast(okText(r), 5000);
+  } catch (e) { toast('Ошибка: ' + e.message, 6000); }
+  OV.busy = false;
+  refreshVPN();
+  if (S.tab === 'settings') keepFocus(renderSettings);
+}
+
+function ownVpnSection(inner) {
+  const sec = el('div', 's-section');
+  sec.append(el('h2', '', 'Свой VPN (без Happ)'));
+  inner.append(sec);
+  if (!OV.st) {
+    sec.append(el('p', 'note', 'Загружаю…'));
+    if (!OV.loading) {
+      OV.loading = true;
+      api.get('/api/ownvpn').then((r) => { OV.st = r; }).catch(() => { OV.st = { configured: false, servers: [] }; })
+        .finally(() => { OV.loading = false; if (S.tab === 'settings') keepFocus(renderSettings); });
+    }
+    return;
+  }
+  const st = OV.st;
+  sec.append(el('p', 'note', 'TVHub сам подключается к вашим VPN-серверам — на том же движке Xray, что и Happ. Российские сайты идут напрямую, всё остальное — через VPN, поэтому VPN не нужно выключать ради Кинопоиска. ' +
+    'Вставьте ссылку-подписку вашего VPN-сервиса (https://…). Её дают в личном кабинете или боте сервиса, а в Happ она видна в настройках подписки. Можно вставить и ссылки на серверы (vless://, vmess://, trojan://, ss://). Набрать ссылку удобно с телефона: вкладка «Текст».'));
+  const form = el('div', 'form');
+  const f = field('Ссылка-подписка', 'ownvpn-sub', 'https://… или vless://…', st.sub || '');
+  f.style.flex = '3';
+  form.append(f);
+  form.append(btn(st.configured ? 'Обновить' : 'Загрузить серверы', () => {
+    const v = $('ownvpn-sub').value.trim();
+    if (!v) { toast('Вставьте ссылку-подписку'); return; }
+    ovPost({ sub: v }, (r) => `Серверов: ${r.servers.length}. Выберите сервер и включите VPN`);
+  }, 'ownvpn-load', 'primary'));
+  sec.append(form);
+  if (!st.configured) return;
+  sec.append(toggleRow('VPN включён', !!st.want, () => ovPost({ on: !st.want }, (r) => (r.on ? 'VPN включён: российские сайты — напрямую, остальные — через VPN' : 'VPN выключен')), 'ownvpn-on'));
+  const line = st.busy ? st.busy : st.error ? 'Ошибка: ' + st.error : st.on ? `Подключено: <b>${esc((st.servers[st.server] || {}).name || '')}</b>` : (st.want ? 'Не подключено' : 'Выключен');
+  sec.append(el('p', 'note', line));
+  const seg = el('div', 'seg');
+  seg.style.flexWrap = 'wrap';
+  st.servers.forEach((s, i) => seg.append(btn(s.name || s.host, () => ovPost({ server: i }, () => `Сервер: ${s.name || s.host}`), 'ownvpn-srv:' + i, i === st.server ? 'sel' : '')));
+  const r = el('div', 's-row');
+  r.style.background = 'transparent'; r.style.padding = '.2rem 0';
+  r.append(seg);
+  sec.append(r);
+  const r2 = el('div', 's-row');
+  r2.style.background = 'transparent'; r2.style.padding = '.2rem 0';
+  r2.append(btn('Удалить подписку', () => modal('Удалить подписку и выключить свой VPN?', [
+    { label: 'Удалить', cls: 'danger', act: () => ovPost({ remove: true }, () => 'Подписка удалена') },
+    { label: 'Отмена' },
+  ]), 'ownvpn-del', 'danger'));
+  sec.append(r2);
+}

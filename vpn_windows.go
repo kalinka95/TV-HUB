@@ -505,7 +505,27 @@ func happElevated(dir string) bool {
 	return false
 }
 
+// setVPN — включить/выключить VPN: свой (если настроен) или Happ.
 func setVPN(on bool) error {
+	if ownVPNConfigured() {
+		v := ownVPNConf()
+		v.On = on
+		saveOwnVPN(v)
+		return ownVPNApply()
+	}
+	return setHappVPN(on)
+}
+
+// happConnected — подключён ли именно Happ (свой VPN TVHub тоже работает через местный прокси).
+func happConnected() (bool, string, string) {
+	t, p := vpnTunnel(), localProxy()
+	if p == ownProxyAddr() {
+		p = ""
+	}
+	return t != "" || p != "", t, p
+}
+
+func setHappVPN(on bool) error {
 	defer func() { // VPN переключился — прошлая проверка «откуда видят российские сайты» уже неверна
 		ruCheckMu.Lock()
 		ruCheckAt = time.Time{}

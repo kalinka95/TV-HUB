@@ -771,8 +771,9 @@ function renderSettings() {
     toast(VPN.st && VPN.st.found ? 'VPN найден' : 'По этому пути программа не найдена');
   }, 'vpn-save', 'primary'));
   vp.append(vpForm);
-  vp.append(el('p', 'note', '<br>Совет: чтобы не переключать VPN вручную, настройте в Happ маршрутизацию, при которой российские сайты идут напрямую (например, правило «geoip:ru / geosite:category-ru → direct»). Тогда Кинопоиск и другие российские сервисы работают и с включённым VPN.'));
+  vp.append(el('p', 'note', '<br>Совет: чтобы не переключать VPN вручную, настройте в Happ маршрутизацию, при которой российские сайты идут напрямую (например, правило «geoip:ru / geosite:category-ru → direct»). Тогда Кинопоиск и другие российские сервисы работают и с включённым VPN. Или включите «Свой VPN» ниже — там это уже настроено.'));
   inner.append(vp);
+  ownVpnSection(inner);
 
   // Пульт на телефоне
   const rm = el('div', 's-section');
@@ -906,9 +907,15 @@ function renderVPN() {
   if (!st || !st.found) return;
   b.classList.toggle('on', !!st.on);
   b.classList.toggle('busy', VPN.busy);
-  $('vpnText').textContent = VPN.busy ? (st.on ? 'VPN: выключаю…' : 'VPN: включаю…')
+  $('vpnText').textContent = VPN.busy || st.busy ? (st.busy || (st.on ? 'VPN: выключаю…' : 'VPN: включаю…'))
+    : st.own ? `VPN: ${st.on ? 'вкл' : (st.running ? 'не подключён' : 'выкл')}`
     : `VPN ${st.name}: ${st.on ? 'вкл' : (st.running ? 'не подключён' : 'выкл')}`;
-  b._info = {
+  b._info = st.own ? {
+    kicker: 'Свой VPN',
+    title: st.on ? `VPN включён · ${st.server}` : 'VPN выключен',
+    sub: st.error ? st.error : (st.on ? 'Российские сайты идут напрямую, остальные — через VPN. Выключать ради Кинопоиска не нужно. OK — меню VPN.' : 'OK — включить VPN или выбрать сервер.'),
+    color: st.on ? '#2fbf7155' : '#3b5bdb44',
+  } : {
     kicker: 'VPN',
     title: `${st.name} ${st.on ? 'включён' : 'выключен'}`,
     sub: st.on
@@ -923,6 +930,14 @@ function renderVPN() {
 function showVPNMenu() {
   const st = VPN.st;
   if (!st || !st.found) return;
+  if (st.own) {
+    modal(`Свой VPN: ${st.on ? 'включён · ' + st.server : 'выключен'}`, [
+      { label: st.on ? 'Выключить VPN' : 'Включить VPN', cls: 'primary', act: toggleVPN },
+      { label: 'Выбрать сервер', act: () => openSettingsAt('ownvpn-srv:' + (OV.st ? OV.st.server : 0)) },
+      { label: 'Отмена' },
+    ]);
+    return;
+  }
   modal(`VPN ${st.name}: ${st.on ? 'включён' : 'выключен'}`, [
     { label: st.on ? 'Выключить VPN' : 'Включить VPN', cls: 'primary', act: toggleVPN },
     { label: `Открыть ${st.name}`, act: async () => {
@@ -983,7 +998,7 @@ function listenEvents() {
     else if (ev.type === 'epg') loadEPGNow();
     else if (ev.type === 'update') onUpdateEvent(ev);
     else if (ev.type === 'brightness') onBrightnessEvent(ev);
-    else if (ev.type === 'vpn') refreshVPN();
+    else if (ev.type === 'vpn') { refreshVPN(); if (OV.st) api.get('/api/ownvpn').then((r) => { OV.st = r; if (S.tab === 'settings' && !OV.busy) keepFocus(renderSettings); }).catch(() => {}); }
     else if (ev.type === 'eq') { if (EQS.d && EQS.d.eq) { EQS.d.eq = ev.eq; if (S.tab === 'settings' && !$('panel-settings').classList.contains('hidden')) keepFocus(renderSettings); } }
     else if (ev.type === 'home') window.tvHome();
     else if (ev.type === 'music') window.tvMusic();

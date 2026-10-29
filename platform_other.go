@@ -231,3 +231,18 @@ func tvFront() {}
 
 func insideOpen() bool                      { return false }
 func uiEvent(ev map[string]any, cmd string) { pushEvent(ev) }
+
+// Свой VPN в режиме разработки: Xray не запускается, только делаем вид.
+var devXray bool
+
+func xrayInstalled() bool { return true }
+func xrayInstall() error  { return nil }
+func xrayStart(conf []byte) error {
+	log.Printf("xray start: %d байт настроек", len(conf))
+	devXray = true
+	return nil
+}
+func xrayStop()         { devXray = false }
+func xrayRunning() bool { return devXray }
+func happOffForOwn()    {}
+func ownVPNStartup()    { go refreshOwnSubscription() }

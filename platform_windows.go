@@ -417,6 +417,7 @@ func runPlatform() {
 	uiURL = strings.TrimSpace(addr)
 	wv.Navigate(uiURL)
 	wv.Run()
+	xrayStop() // свой VPN выключаем, прежние настройки прокси Windows возвращаем
 	closeWebApp()
 	resetBrightness() // программное затемнение не должно остаться после выхода
 }

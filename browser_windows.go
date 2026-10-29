@@ -57,6 +57,9 @@ func bypassVPN(a App) bool {
 // prepareRuServiceAny — для сайта внутри TVHub: VPN включён в любом режиме (TUN или системный прокси) —
 // выключаем, иначе российский сервис его не пропустит.
 func prepareRuServiceAny(a App) {
+	if ownVPNOn() {
+		return // свой VPN сам пускает российские сайты напрямую
+	}
 	if err := setVPN(false); err != nil && err != errNeedClick {
 		notify("vpn", "Не удалось выключить VPN для «"+a.Name+"»", err.Error(), nil)
 		return
@@ -66,7 +69,7 @@ func prepareRuServiceAny(a App) {
 }
 
 func prepareRuService(a App) {
-	if !bypassVPN(a) {
+	if !bypassVPN(a) || ownVPNOn() { // свой VPN сам пускает российские сайты напрямую
 		return
 	}
 	// Российские сайты видят зарубежный адрес — значит, трафик идёт через VPN (режим TUN).

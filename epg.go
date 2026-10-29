@@ -548,6 +548,7 @@ func startBackground() {
 	}()
 	go reminderLoop()
 	go updateLoop()
+	ownVPNStartup() // свой VPN: включить снова, если был включён
 	go restoreBrightness()
 	cleanupAfterUpdate()
 	go refreshWallpapers()

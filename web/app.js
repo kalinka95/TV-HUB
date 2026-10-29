@@ -560,14 +560,16 @@ function appMenu(app) {
     { label: '← Левее', act: () => { moveApp(app, -1); rerenderMain(k); } },
     { label: 'Правее →', act: () => { moveApp(app, 1); rerenderMain(k); } },
   ];
-  // Сайт пишет «браузер не поддерживается» или не пускает в аккаунт — открывать как обычный Edge
-  if (app.type === 'web') {
-    const auto = /(^|\.)twitch\.tv$/i.test((() => { try { return new URL(app.target).hostname; } catch (e) { return ''; } })());
-    items.push({ label: app.inside ? 'Внутри TVHub (проба): вкл' : 'Внутри TVHub (проба): выкл', act: () => {
-      app.inside = !app.inside; saveCfg();
-      toast(app.inside ? 'Сайт будет открываться прямо в окне TVHub. «Домой» — вернуться. Если видео не играет — выключите этот режим' : 'Сайт снова открывается в Edge', 6000);
+  // Сайты открываются внутри TVHub; если сайту это не подходит — можно открывать в отдельном Edge
+  if (app.type === 'web' && !app.userAgent) {
+    items.push({ label: app.inEdge ? 'Открывать в Edge: вкл' : 'Открывать в Edge: выкл', act: () => {
+      app.inEdge = !app.inEdge; saveCfg();
+      toast(app.inEdge ? 'Сайт будет открываться в отдельном Edge' : 'Сайт снова открывается прямо в TVHub', 5000);
     } });
-    if (!auto && !app.inside) items.push({ label: app.plain ? 'Обычный браузер: вкл' : 'Обычный браузер: выкл', act: () => {
+  }
+  if (app.type === 'web' && (app.inEdge || app.userAgent)) {
+    const auto = /(^|\.)twitch\.tv$/i.test((() => { try { return new URL(app.target).hostname; } catch (e) { return ''; } })());
+    if (!auto) items.push({ label: app.plain ? 'Обычный браузер: вкл' : 'Обычный браузер: выкл', act: () => {
       app.plain = !app.plain; saveCfg();
       toast(app.plain ? 'Сайт будет открываться как обычный Edge — если он не пускал в аккаунт, попробуйте снова' : 'Сайт снова открывается как раньше', 5000);
     } });

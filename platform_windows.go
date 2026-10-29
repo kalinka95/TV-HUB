@@ -177,7 +177,7 @@ func closeWebApp() {
 var keepWebApps bool
 
 func launchApp(a App) (err error) {
-	if a.Inside && a.Type == "web" {
+	if openInsideTVHub(a) {
 		return openInside(a)
 	}
 	// Пока приложение открывается, TVHub с заставкой — поверх всех окон
@@ -503,6 +503,17 @@ func openInside(a App) error {
 	insideMu.Unlock()
 	target := a.Target
 	go func() {
+		// Российский сервис: встроенный браузер ходит в интернет так же, как Windows, — и через
+		// прокси VPN тоже. Поэтому VPN выключаем при любом его режиме, если трафик идёт через него.
+		if bypassVPN(a) {
+			if on, _, _ := vpnConnected(); on {
+				// Проверяем тем же путём, каким пойдёт встроенный браузер (через прокси VPN, если он включён).
+				// Если в Happ настроено «российское — напрямую», Яндекс увидит российский адрес — VPN не трогаем.
+				if foreign, known := ruTrafficForeignVia(systemProxyURL()); foreign || !known {
+					prepareRuServiceAny(a)
+				}
+			}
+		}
 		time.Sleep(600 * time.Millisecond) // пусть на экране успеет появиться заставка перехода
 		wv.Dispatch(func() {
 			bringToFront()

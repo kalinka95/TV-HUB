@@ -49,3 +49,9 @@ func plainBrowser(a App) bool {
 	}
 	return false
 }
+
+// openInsideTVHub — открывать ли сайт прямо в окне TVHub (так по умолчанию). В отдельном Edge
+// остаются сайты с особым «браузером» (YouTube для телевизоров) и те, где это выбрали вручную.
+func openInsideTVHub(a App) bool {
+	return a.Type == "web" && a.UserAgent == "" && !a.InEdge
+}

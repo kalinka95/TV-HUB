@@ -54,6 +54,17 @@ func bypassVPN(a App) bool {
 
 // prepareRuService: если VPN работает «туннелем» (весь трафик через VPN), обойти его нельзя —
 // выключаем VPN перед открытием российского сервиса и сообщаем об этом.
+// prepareRuServiceAny — для сайта внутри TVHub: VPN включён в любом режиме (TUN или системный прокси) —
+// выключаем, иначе российский сервис его не пропустит.
+func prepareRuServiceAny(a App) {
+	if err := setVPN(false); err != nil && err != errNeedClick {
+		notify("vpn", "Не удалось выключить VPN для «"+a.Name+"»", err.Error(), nil)
+		return
+	}
+	notify("vpn", "VPN выключен, чтобы открылся «"+a.Name+"»", "Российские сервисы не работают через VPN. Включить его снова — кнопка VPN вверху", nil)
+	pushEvent(map[string]string{"type": "vpn"})
+}
+
 func prepareRuService(a App) {
 	if !bypassVPN(a) {
 		return

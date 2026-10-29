@@ -10,6 +10,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -347,20 +348,30 @@ var (
 	ruCheckAt  time.Time
 	ruCheckFor bool
 	ruCheckOK  bool
+	ruCheckVia string
 )
 
 // ruTrafficForeign — идут ли российские сайты через VPN: спрашиваем Яндекс, с какого адреса
 // к нему приходят, и узнаём страну этого адреса. Учитывает и правила Happ «российское — напрямую».
 // known=false — проверить не получилось. Ответ живёт 20 секунд.
-func ruTrafficForeign() (foreign, known bool) {
+func ruTrafficForeign() (foreign, known bool) { return ruTrafficForeignVia("") }
+
+// ruTrafficForeignVia — то же, но запросы к Яндексу идут через прокси proxy (как у встроенного браузера).
+func ruTrafficForeignVia(proxy string) (foreign, known bool) {
 	ruCheckMu.Lock()
 	defer ruCheckMu.Unlock()
-	if time.Since(ruCheckAt) < 20*time.Second {
+	if ruCheckVia == proxy && time.Since(ruCheckAt) < 20*time.Second {
 		return ruCheckFor, ruCheckOK
 	}
 	c := &http.Client{Timeout: 3 * time.Second}
-	get := func(u string) string {
-		resp, err := c.Get(u)
+	viaClient := c
+	if proxy != "" {
+		if pu, err := url.Parse(proxy); err == nil {
+			viaClient = &http.Client{Timeout: 3 * time.Second, Transport: &http.Transport{Proxy: http.ProxyURL(pu)}}
+		}
+	}
+	getVia := func(cl *http.Client, u string) string {
+		resp, err := cl.Get(u)
 		if err != nil {
 			return ""
 		}
@@ -371,9 +382,10 @@ func ruTrafficForeign() (foreign, known bool) {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 256))
 		return strings.Trim(strings.TrimSpace(string(b)), `"`)
 	}
+	get := func(u string) string { return getVia(c, u) }
 	ip := ""
 	for _, u := range []string{"https://yandex.ru/internet/api/v0/ip", "https://ipv4-internet.yandex.net/api/v0/ip"} {
-		if ip = get(u); net.ParseIP(ip) != nil {
+		if ip = getVia(viaClient, u); net.ParseIP(ip) != nil {
 			break
 		}
 		ip = ""
@@ -387,7 +399,7 @@ func ruTrafficForeign() (foreign, known bool) {
 			}
 		}
 	}
-	ruCheckAt, ruCheckOK, ruCheckFor = time.Now(), cc != "", cc != "" && cc != "RU"
+	ruCheckAt, ruCheckOK, ruCheckFor, ruCheckVia = time.Now(), cc != "", cc != "" && cc != "RU", proxy
 	if cc != "" {
 		log.Printf("VPN: Яндекс видит адрес %s (%s)", ip, cc)
 	}

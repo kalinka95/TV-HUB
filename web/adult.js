@@ -83,8 +83,9 @@ function adultSection(inner) {
     return;
   }
   const on = !!S.cfg.settings.adult;
-  sec.append(el('p', 'note', 'Каналы для взрослых из открытого каталога iptv-org. Они появятся в категории «Для взрослых» и закрыты PIN-кодом: без него их не видно ни в списках, ни в поиске, ни в избранном.' +
-    (AD.info.error && on ? `<br>Список пока не загрузился: ${esc(AD.info.error)}` : '')));
+  const n = AD.info.count || 0;
+  sec.append(el('p', 'note', 'Каналы для взрослых из вашего плейлиста — категории «18+», «XXX», «Для взрослых» и похожие. TVHub собирает их в одну категорию «Для взрослых» и закрывает PIN-кодом: без него их не видно ни в списках, ни в поиске, ни в избранном. Пока переключатель выключен, этих каналов нет совсем.<br>' +
+    (n ? `В текущем плейлисте таких каналов: <b>${n}</b>.` : 'В текущем плейлисте таких каналов нет: они бывают в пакетах IPTV-провайдеров. Открытые каталоги каналы 18+ не содержат.')));
   sec.append(toggleRow('Показывать каналы 18+', on, async () => {
     if (on) {
       await api.post('/api/adult', { on: false });
@@ -128,7 +129,9 @@ async function enableAdult() {
   if (!r.ok) { toast(r.error || 'Не получилось'); return; }
   S.cfg.settings.adult = true;
   AD.info.hasPin = true; AD.unlocked = true; AD.at = Date.now();
-  toast('Каналы 18+ включены — категория «Для взрослых» в «Телеканалах»', 5000);
   await loadChannels(true);
+  const n = S.channels.filter((c) => c.adult).length;
+  AD.info = null; // перечитать, сколько каналов 18+ в плейлисте
+  toast(n ? `Каналы 18+ включены: ${n} — категория «Для взрослых» в «Телеканалах», в конце списка` : 'Каналы 18+ включены, но в вашем плейлисте их нет', 6000);
   keepFocus(renderSettings);
 }

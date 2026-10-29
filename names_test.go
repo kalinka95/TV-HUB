@@ -33,3 +33,11 @@ func TestRussifyGroup(t *testing.T) {
 		}
 	}
 }
+
+func TestAdultGroup(t *testing.T) {
+	for g, want := range map[string]bool{"XXX": true, "18+": true, "Для взрослых": true, "Эротика": true, "Adult;Movies": true, "Кино": false, "Новости": false, "Sports": false, "Матч! Футбол 1": false, "Взрослые сериалы": false} {
+		if isAdultGroup(g) != want {
+			t.Errorf("%q: %v", g, !want)
+		}
+	}
+}

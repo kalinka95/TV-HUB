@@ -53,8 +53,20 @@ func bypassVPN(a App) bool {
 // prepareRuService: если VPN работает «туннелем» (весь трафик через VPN), обойти его нельзя —
 // выключаем VPN перед открытием российского сервиса и сообщаем об этом.
 func prepareRuService(a App) {
-	if !bypassVPN(a) || vpnTunnel() == "" {
+	if !bypassVPN(a) {
 		return
+	}
+	// Российские сайты видят зарубежный адрес — значит, трафик идёт через VPN (режим TUN).
+	// В режиме «системный прокси» Edge и так открывает их напрямую (--no-proxy-server).
+	foreign, known := ruTrafficForeign()
+	if known && !foreign {
+		return
+	}
+	if !known && vpnTunnel() == "" {
+		return
+	}
+	if on, _, _ := vpnConnected(); !on && vpnTunnel() == "" && len(happProcs(filepath.Dir(findVPN()))) == 0 {
+		return // VPN не включён — значит, мы просто за границей, выключать нечего
 	}
 	if err := setVPN(false); err != nil && err != errNeedClick {
 		notify("vpn", "Не удалось выключить VPN для «"+a.Name+"»", err.Error(), nil)

@@ -1,5 +1,6 @@
-// Каналы 18+: отдельный открытый список каталога iptv-org. Выключены по умолчанию;
-// включаются в настройках после подтверждения возраста и закрыты PIN-кодом.
+// Каналы 18+ из плейлиста: категории «18+», «XXX», «Для взрослых» и похожие собираются в одну
+// категорию «Для взрослых». Пока каналы 18+ не включены в настройках, их не видно; когда включены —
+// они закрыты PIN-кодом.
 package main
 
 import (
@@ -7,61 +8,49 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"io"
-	"log"
 	"net/http"
 	"regexp"
-	"sync"
-	"time"
 )
-
-var adultURL = envOr("TVHUB_ADULT_URL", "https://iptv-org.github.io/iptv/categories/xxx.m3u")
 
 const adultGroup = "Для взрослых"
 
 var (
-	adultMu    sync.Mutex
-	adultList  []Channel
-	adultAt    time.Time
-	adultErr   string
-	pinDigitRe = regexp.MustCompile(`^[0-9]{4}$`)
+	adultGroupRe = regexp.MustCompile(`(?i)(^|[^a-zа-я0-9])(xxx|adult|18\s*\+|\+\s*18|для взрослых|эрот|erotic|porn|порно)`)
+	pinDigitRe   = regexp.MustCompile(`^[0-9]{4}$`)
 )
 
-// withAdult добавляет каналы 18+ в конец списка, если они включены в настройках.
-func withAdult(main []Channel, force bool) []Channel {
+func isAdultGroup(g string) bool { return adultGroupRe.MatchString(" " + g) }
+
+// withAdult отмечает каналы 18+ из плейлиста. Выключены в настройках — убирает их из списка.
+func withAdult(list []Channel, _ bool) []Channel {
 	cfgMu.Lock()
 	on := cfg.Settings.Adult
 	cfgMu.Unlock()
-	if !on {
-		return main
-	}
-	adultMu.Lock()
-	if force || adultList == nil || time.Since(adultAt) > 6*time.Hour {
-		if rc, err := openPlaylist(adultURL); err == nil {
-			adultList = parseM3U(rc)
-			rc.Close()
-			adultAt, adultErr = time.Now(), ""
-		} else {
-			adultErr = err.Error()
-			log.Printf("каналы 18+: %v", err)
-			if adultList == nil {
-				adultAt = time.Now().Add(-6*time.Hour + 5*time.Minute) // повторим через 5 минут
+	out := make([]Channel, 0, len(list))
+	for _, c := range list {
+		if c.Adult || isAdultGroup(c.Group) {
+			if !on {
+				continue
 			}
+			c.Adult, c.Group = true, adultGroup
 		}
-	}
-	extra := adultList
-	adultMu.Unlock()
-	out := make([]Channel, 0, len(main)+len(extra))
-	out = append(out, main...)
-	n := 0
-	for _, c := range main {
-		n = max(n, c.N)
-	}
-	for _, c := range extra {
-		n++
-		c.N, c.Group, c.Adult = n, adultGroup, true
 		out = append(out, c)
 	}
 	return out
+}
+
+// adultCount — сколько каналов 18+ в текущем плейлисте (для настроек).
+func adultCount() int {
+	cacheMu.Lock()
+	ch := cache.channels
+	cacheMu.Unlock()
+	n := 0
+	for _, c := range ch {
+		if isAdultGroup(c.Group) {
+			n++
+		}
+	}
+	return n
 }
 
 func pinHash(pin string) string {
@@ -78,6 +67,7 @@ func handleAdult(w http.ResponseWriter, r *http.Request) {
 		Reset bool   `json:"reset"`
 	}
 	json.NewDecoder(io.LimitReader(r.Body, 1024)).Decode(&req)
+	count := adultCount()
 	cfgMu.Lock()
 	defer cfgMu.Unlock()
 	hasPin := cfg.AdultPin != ""
@@ -111,9 +101,6 @@ func handleAdult(w http.ResponseWriter, r *http.Request) {
 		saveConfigLocked()
 		writeJSON(w, map[string]any{"ok": true, "hasPin": hasPin})
 	default:
-		adultMu.Lock()
-		e := adultErr
-		adultMu.Unlock()
-		writeJSON(w, map[string]any{"ok": true, "on": cfg.Settings.Adult, "hasPin": hasPin, "error": e})
+		writeJSON(w, map[string]any{"ok": true, "on": cfg.Settings.Adult, "hasPin": hasPin, "count": count})
 	}
 }

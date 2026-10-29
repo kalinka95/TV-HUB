@@ -6,8 +6,10 @@ package main
 import (
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -293,10 +295,38 @@ func allProcs() []procInfo {
 	return out
 }
 
-var tunRe = regexp.MustCompile(`(?i)happ|xray|sing|wintun|v2ray|clash|\btun`)
+var tunRe = regexp.MustCompile(`(?i)happ|xray|sing-?box|wintun|v2ray|clash|\btun\b|tap-windows|wireguard|outline`)
 
-// vpnTunnel — имя сетевого адаптера VPN, если он поднят.
+// vpnTunnel — сетевой адаптер VPN, если он поднят. Смотрим и на имя, и на описание адаптера:
+// у адаптера Happ имя может быть обычным («Ethernet 3»), а описание — «Wintun Userspace Tunnel» и т. п.
 func vpnTunnel() string {
+	var size uint32 = 15000
+	for i := 0; i < 3; i++ {
+		buf := make([]byte, size)
+		aa := (*windows.IpAdapterAddresses)(unsafe.Pointer(&buf[0]))
+		err := windows.GetAdaptersAddresses(windows.AF_UNSPEC, windows.GAA_FLAG_SKIP_ANYCAST|windows.GAA_FLAG_SKIP_MULTICAST|windows.GAA_FLAG_SKIP_DNS_SERVER, 0, aa, &size)
+		if err == windows.ERROR_BUFFER_OVERFLOW {
+			continue
+		}
+		if err != nil {
+			break
+		}
+		for a := aa; a != nil; a = a.Next {
+			if a.OperStatus != windows.IfOperStatusUp || a.FirstUnicastAddress == nil {
+				continue
+			}
+			name, desc := windows.UTF16PtrToString(a.FriendlyName), windows.UTF16PtrToString(a.Description)
+			low := strings.ToLower(name + " " + desc)
+			if strings.Contains(low, "teredo") || strings.Contains(low, "isatap") || strings.Contains(low, "6to4") {
+				continue
+			}
+			if tunRe.MatchString(name) || tunRe.MatchString(desc) {
+				return name
+			}
+		}
+		return ""
+	}
+	// Запасной способ — по именам адаптеров
 	ifs, _ := net.Interfaces()
 	for _, i := range ifs {
 		low := strings.ToLower(i.Name)
@@ -310,6 +340,58 @@ func vpnTunnel() string {
 		}
 	}
 	return ""
+}
+
+var (
+	ruCheckMu  sync.Mutex
+	ruCheckAt  time.Time
+	ruCheckFor bool
+	ruCheckOK  bool
+)
+
+// ruTrafficForeign — идут ли российские сайты через VPN: спрашиваем Яндекс, с какого адреса
+// к нему приходят, и узнаём страну этого адреса. Учитывает и правила Happ «российское — напрямую».
+// known=false — проверить не получилось. Ответ живёт 20 секунд.
+func ruTrafficForeign() (foreign, known bool) {
+	ruCheckMu.Lock()
+	defer ruCheckMu.Unlock()
+	if time.Since(ruCheckAt) < 20*time.Second {
+		return ruCheckFor, ruCheckOK
+	}
+	c := &http.Client{Timeout: 3 * time.Second}
+	get := func(u string) string {
+		resp, err := c.Get(u)
+		if err != nil {
+			return ""
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != 200 {
+			return ""
+		}
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 256))
+		return strings.Trim(strings.TrimSpace(string(b)), `"`)
+	}
+	ip := ""
+	for _, u := range []string{"https://yandex.ru/internet/api/v0/ip", "https://ipv4-internet.yandex.net/api/v0/ip"} {
+		if ip = get(u); net.ParseIP(ip) != nil {
+			break
+		}
+		ip = ""
+	}
+	cc := ""
+	if ip != "" {
+		for _, u := range []string{"http://ip-api.com/line/" + ip + "?fields=countryCode", "https://ipinfo.io/" + ip + "/country"} {
+			if v := strings.ToUpper(get(u)); len(v) == 2 {
+				cc = v
+				break
+			}
+		}
+	}
+	ruCheckAt, ruCheckOK, ruCheckFor = time.Now(), cc != "", cc != "" && cc != "RU"
+	if cc != "" {
+		log.Printf("VPN: Яндекс видит адрес %s (%s)", ip, cc)
+	}
+	return ruCheckFor, ruCheckOK
 }
 
 // localProxy — системный прокси Windows, указывающий на этот компьютер (так работает режим «системный прокси»).
@@ -412,6 +494,11 @@ func happElevated(dir string) bool {
 }
 
 func setVPN(on bool) error {
+	defer func() { // VPN переключился — прошлая проверка «откуда видят российские сайты» уже неверна
+		ruCheckMu.Lock()
+		ruCheckAt = time.Time{}
+		ruCheckMu.Unlock()
+	}()
 	p := findVPN()
 	if p == "" {
 		return errors.New("Happ не найден. Укажите путь к Happ.exe в «Настройки» → «VPN»")

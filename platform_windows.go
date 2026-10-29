@@ -404,6 +404,7 @@ func runPlatform() {
 	}
 	defer wv.Destroy()
 	hwnd = uintptr(wv.Window())
+	wv.Init(noPopupsJS) // сайты внутри TVHub не открывают новых окон
 
 	if cfg.Settings.Fullscreen {
 		setFullscreen(true)
@@ -545,3 +546,20 @@ func uiEvent(ev map[string]any, cmd string) {
 	}
 	pushEvent(ev)
 }
+
+// noPopupsJS выполняется на каждой странице сайта, открытого внутри TVHub, раньше скриптов
+// самого сайта: ссылки «в новой вкладке», всплывающие окна (например, вход через Яндекс ID)
+// и формы открываются в том же окне TVHub, а не отдельным окном.
+const noPopupsJS = `(() => {
+  if (location.hostname === '127.0.0.1' || location.hostname === 'localhost') return; // сам TVHub
+  const go = (u) => {
+    try { const t = new URL(u, location.href).href; (window.top || window).location.href = t; } catch (e) {}
+  };
+  window.open = function (u) { if (u && u !== 'about:blank') go(u); return null; };
+  const same = (t) => !t || t === '_self' || t === '_top' || t === '_parent';
+  document.addEventListener('click', (e) => {
+    const a = e.target && e.target.closest ? e.target.closest('a[target]') : null;
+    if (a && a.href && !same(a.target) && !a.hasAttribute('download')) a.target = '_self';
+  }, true);
+  document.addEventListener('submit', (e) => { const f = e.target; if (f && !same(f.target)) f.target = '_self'; }, true);
+})();`

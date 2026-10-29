@@ -132,16 +132,34 @@ func eqDeviceActive() (string, bool, error) {
 }
 
 // openEQConfigurator открывает Configurator Equalizer APO: в нём отмечают устройство для эквалайзера.
+// Сам файл называется DeviceSelector.exe (в меню «Пуск» — «Configurator»).
 func openEQConfigurator() error {
-	d := eqConfigDir()
-	if d == "" {
-		return errors.New("Equalizer APO не установлен")
+	var dirs []string
+	for _, view := range []uint32{registry.WOW64_64KEY, registry.WOW64_32KEY} {
+		if k, err := registry.OpenKey(registry.LOCAL_MACHINE, `SOFTWARE\EqualizerAPO`, registry.QUERY_VALUE|view); err == nil {
+			if ip, _, e := k.GetStringValue("InstallPath"); e == nil && ip != "" {
+				dirs = append(dirs, ip)
+			}
+			k.Close()
+		}
 	}
-	exe := filepath.Join(filepath.Dir(d), "Configurator.exe")
-	if _, err := os.Stat(exe); err != nil {
-		return errors.New("не нашёл Configurator.exe в папке Equalizer APO")
+	if d := eqConfigDir(); d != "" {
+		dirs = append(dirs, filepath.Dir(d))
 	}
-	return windows.ShellExecute(0, windows.StringToUTF16Ptr("runas"), windows.StringToUTF16Ptr(exe), nil, windows.StringToUTF16Ptr(filepath.Dir(exe)), 1)
+	for _, env := range []string{"ProgramW6432", "ProgramFiles", "ProgramFiles(x86)"} {
+		if v := os.Getenv(env); v != "" {
+			dirs = append(dirs, filepath.Join(v, "EqualizerAPO"))
+		}
+	}
+	for _, d := range dirs {
+		for _, name := range []string{"DeviceSelector.exe", "Configurator.exe"} {
+			exe := filepath.Join(d, name)
+			if _, err := os.Stat(exe); err == nil {
+				return windows.ShellExecute(0, windows.StringToUTF16Ptr("runas"), windows.StringToUTF16Ptr(exe), nil, windows.StringToUTF16Ptr(d), 1)
+			}
+		}
+	}
+	return errors.New("не нашёл Configurator Equalizer APO. Откройте его сами: «Пуск» → «Equalizer APO» → «Configurator»")
 }
 
 const eqInclude = "Include: tvhub.txt"

@@ -34,6 +34,8 @@ func appProfile(a App) string {
 	switch {
 	case a.Type == "music":
 		return "browser-music"
+	case plainBrowser(a):
+		return "browser-p-" + a.ID // отдельный Edge без управления TVHub
 	case a.UserAgent != "":
 		return "browser-" + a.ID
 	case !isRuService(a):
@@ -401,12 +403,18 @@ func openWebApp(a App) error {
 	appWinMu.Lock()
 	h := appWins[a.ID]
 	appWinMu.Unlock()
+	if h != 0 && plainBrowser(a) && windowOfProfile(dir, "") != h {
+		h = 0 // окно открыто ещё в старом режиме — открываем заново как обычный браузер
+	}
 	if h != 0 {
 		if alive, _, _ := procIsWindow.Call(h); alive != 0 {
 			focusWindow(h)
 			go func() { time.Sleep(600 * time.Millisecond); curtainDown(h) }() // окно успевает развернуться
 			return nil
 		}
+	}
+	if plainBrowser(a) {
+		return openPlainWebApp(a, browser, dir)
 	}
 	if _, main := profileProcs(dir); main != 0 {
 		list, port := cdpTargets(dir)
@@ -587,4 +595,59 @@ func restartWebApps() {
 			killProfile(profileDir(e.Name()))
 		}
 	}
+}
+
+// openPlainWebApp открывает сайт в Edge как обычный браузер — без порта управления (его замечают,
+// например, при входе в аккаунт Twitch). Окно сразу открывается на весь экран телевизора, за заставкой.
+func openPlainWebApp(a App, browser, dir string) error {
+	if h := windowOfProfile(dir, ""); h != 0 {
+		focusWindow(h)
+		rememberAppWindow(a.ID, h)
+		go func() { time.Sleep(600 * time.Millisecond); curtainDown(h) }()
+		return nil
+	}
+	r := tvhubMonitor()
+	args := []string{
+		"--user-data-dir=" + dir,
+		"--no-first-run", "--no-default-browser-check",
+		fmt.Sprintf("--window-position=%d,%d", r.Left, r.Top), fmt.Sprintf("--window-size=%d,%d", r.Right-r.Left, r.Bottom-r.Top),
+		"--start-fullscreen",
+		"--autoplay-policy=no-user-gesture-required",
+		"--app=" + a.Target,
+	}
+	if a.UserAgent != "" {
+		args = append(args, "--user-agent="+a.UserAgent)
+	}
+	if bypassVPN(a) {
+		args = append(args, "--no-proxy-server")
+	}
+	cfgMu.Lock()
+	dark := cfg.Settings.DarkSites
+	cfgMu.Unlock()
+	if dark {
+		args = append(args, "--enable-features=WebContentsForceDark")
+	}
+	before := browserWindows()
+	c := exec.Command(browser, args...)
+	if err := c.Start(); err != nil {
+		return err
+	}
+	go c.Wait()
+	go func() {
+		var h uintptr
+		for t := time.Now(); time.Since(t) < 15*time.Second && h == 0; time.Sleep(200 * time.Millisecond) {
+			for w := range browserWindows() {
+				if !before[w] {
+					h = w
+				}
+			}
+		}
+		if h != 0 {
+			time.Sleep(2500 * time.Millisecond) // страница успевает загрузиться (узнать это без управления нельзя)
+			rememberAppWindow(a.ID, h)
+			focusWindow(h)
+		}
+		curtainDown(h)
+	}()
+	return nil
 }

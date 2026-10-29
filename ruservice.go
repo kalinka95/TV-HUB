@@ -25,3 +25,27 @@ func isRuService(a App) bool {
 	}
 	return false
 }
+
+// Сайты, которые не пускают в аккаунт браузер, которым управляет программа (у TVHub это служебный
+// порт управления Edge). Для них Edge открывается как обычный браузер.
+var plainHosts = []string{"twitch.tv"}
+
+func plainBrowser(a App) bool {
+	if a.Type != "web" {
+		return false
+	}
+	if a.Plain {
+		return true
+	}
+	u, err := url.Parse(a.Target)
+	if err != nil {
+		return false
+	}
+	h := strings.ToLower(u.Hostname())
+	for _, x := range plainHosts {
+		if h == x || strings.HasSuffix(h, "."+x) {
+			return true
+		}
+	}
+	return false
+}

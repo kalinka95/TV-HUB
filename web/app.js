@@ -556,9 +556,20 @@ function moveApp(app, d) {
 
 function appMenu(app) {
   const k = cur && cur.dataset.k;
-  modal(`«${app.name}»`, [
+  const items = [
     { label: '← Левее', act: () => { moveApp(app, -1); rerenderMain(k); } },
     { label: 'Правее →', act: () => { moveApp(app, 1); rerenderMain(k); } },
+  ];
+  // Сайт пишет «браузер не поддерживается» или не пускает в аккаунт — открывать как обычный Edge
+  if (app.type === 'web') {
+    const auto = /(^|\.)twitch\.tv$/i.test((() => { try { return new URL(app.target).hostname; } catch (e) { return ''; } })());
+    if (!auto) items.push({ label: app.plain ? 'Обычный браузер: вкл' : 'Обычный браузер: выкл', act: () => {
+      app.plain = !app.plain; saveCfg();
+      toast(app.plain ? 'Сайт будет открываться как обычный Edge — если он не пускал в аккаунт, попробуйте снова' : 'Сайт снова открывается как раньше', 5000);
+    } });
+  }
+  modal(`«${app.name}»`, [
+    ...items,
     { label: 'Удалить', cls: 'danger', act: () => {
       S.cfg.apps = S.cfg.apps.filter((x) => x !== app); saveCfg(); rerenderMain(null);
     } },
